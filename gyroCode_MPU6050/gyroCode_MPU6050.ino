@@ -1,8 +1,10 @@
 #include<Wire.h>
 #include<MPU6050.h>
+#include<math.h>
 
 const bool mpuCalibration = false;
 const int sampleSize = 2000; //change this value to change the MPU6050 calibration sample size;
+const float alpha = 0.98; 
 
 float gyroXoffset = 0;
 float gyroYoffset = 0;
@@ -20,7 +22,7 @@ int16_t tempRaw;
 
 
 
-unsigned long previousTime = millis();
+unsigned long previousTime = micros();
 
 void setup() {
   Serial.begin(9600);
@@ -36,9 +38,7 @@ void setup() {
     Serial.println("Faild to connect to MPU-6050");
     while(1); //do nothing if faild to connect to mpu6050
   }
-
   calibrateMPU6050Offset();
-
 }
 
 void loop() {
@@ -54,8 +54,8 @@ void loop() {
 void convertRawGyroValues(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_t gy, int16_t gz, int16_t tempRaw){
 
   //calculate delta
-  unsigned long currentTime = millis();
-  float deltaTime = (currentTime - previousTime)/1000.0;
+  unsigned long currentTime = micros();
+  float deltaTime = (currentTime - previousTime)/1000000.0;
   previousTime = currentTime;
 
   // 1g = 16384 raw units
@@ -70,10 +70,18 @@ void convertRawGyroValues(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_
 
   float temp = (tempRaw / 340.0) + 36.53;
 
-  //anguler velocity overtime
+  //angle from accselerometer
+  float pitchAcc = atan2(accY,sqrt(accX * accX + accZ * accZ))*180/PI;
+  float rollAcc =  atan2(-accX, accZ) * 180 / PI;
+
+
+  //anguler velocity overtime (angle forom gyro)
   pitch += gyroY * deltaTime;
   roll += gyroX * deltaTime;
   yaw += gyroZ * deltaTime;
+
+  pitch = alpha * pitch + (1.0-alpha) * pitchAcc;
+  roll = alpha * roll + (1.0 -alpha) * rollAcc;
 
 /*
   Serial.println("-------- Accelerometer --------");
@@ -100,6 +108,7 @@ void calibrateMPU6050Offset(){
     sumX += gx;
     sumY += gy;
     sumZ += gz;
+    delay(5);
   }
   gyroXoffset = (float)sumX/sampleSize;
   gyroYoffset = (float)sumY/sampleSize;
