@@ -1,11 +1,12 @@
 #include<Wire.h>
 #include<MPU6050.h>
 
-#define bool mpuCalibration = false;
-#define sampleCount = 2000; //change this value to change the MPU6050 calibration sample size;
-#define gyroXoffset = 0;
-#define gyroYoffset = 0;
-#define gyroZoffset = 0;
+const bool mpuCalibration = false;
+const int sampleSize = 2000; //change this value to change the MPU6050 calibration sample size;
+
+float gyroXoffset = 0;
+float gyroYoffset = 0;
+float gyroZoffset = 0;
 
 static float pitch = 0;
 static float roll = 0;
@@ -33,8 +34,10 @@ void setup() {
   }
   else{
     Serial.println("Faild to connect to MPU-6050");
-    while(1);
+    while(1); //do nothing if faild to connect to mpu6050
   }
+
+  calibrateMPU6050Offset();
 
 }
 
@@ -61,9 +64,9 @@ void convertRawGyroValues(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_
   float accZ = az / 16384.0;
 
   // 1°/s = 131 raw units
-  float gyroX = gx / 131.0;
-  float gyroY = gy / 131.0;
-  float gyroZ = gz / 131.0;
+  float gyroX = (gx - gyroXoffset)/ 131.0;
+  float gyroY = (gy - gyroYoffset) / 131.0;
+  float gyroZ = (gz - gyroZoffset) / 131.0;
 
   float temp = (tempRaw / 340.0) + 36.53;
 
@@ -90,12 +93,16 @@ void convertRawGyroValues(int16_t ax, int16_t ay, int16_t az, int16_t gx, int16_
 }
 
 void calibrateMPU6050Offset(){
+  Serial.println("Calibraiting MPU6050 DO NOT MOVE the device ......!! ");
   long sumX =0,sumY=0,sumZ=0;
-  for(int count = 0 ;count < sampleCount ; count ++){
+  for(int count = 0 ;count < sampleSize ; count ++){
     mpu.getRotation(&gx, &gy, &gz);
     sumX += gx;
     sumY += gy;
     sumZ += gz;
   }
-  gyroXoffset = sumX/200
+  gyroXoffset = (float)sumX/sampleSize;
+  gyroYoffset = (float)sumY/sampleSize;
+  gyroZoffset = (float)sumZ/sampleSize;
+  Serial.println("Calibration Complete ....!!! ");
 }
