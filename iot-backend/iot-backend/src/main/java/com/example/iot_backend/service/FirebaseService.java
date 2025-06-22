@@ -1,120 +1,121 @@
 package com.example.iot_backend.service;
 
-import com.example.iot_backend.entity.DeviceReading;
-import com.example.iot_backend.entity.GForce;
-import com.example.iot_backend.entity.Gyro;
-import com.example.iot_backend.entity.Location;
-import com.example.iot_backend.model.AnalysisResult;
+import com.example.iot_backend.model.DeviceReading;
 import com.google.firebase.database.*;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-
-import java.util.*;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 
 @Service
 public class FirebaseService {
-    private static final Logger logger = LoggerFactory.getLogger(FirebaseService.class);
-    private final DatabaseReference databaseRef;
 
-    @Autowired
-    public FirebaseService(FirebaseDatabase firebaseDatabase) {
-        this.databaseRef = firebaseDatabase.getReference("event");
+    private final FirebaseDatabase database;
+
+    public FirebaseService() {
+        this.database = FirebaseDatabase.getInstance();
     }
 
-    public List<DeviceReading> getUnprocessedEntries() {
-        List<DeviceReading> entries = new ArrayList<>();
-        CompletableFuture<List<DeviceReading>> future = new CompletableFuture<>();
+    // Method to save device reading under 'event' node
+    public void saveDeviceReading(DeviceReading reading) {
+        DatabaseReference ref = database.getReference("event").push();
+        ref.setValue(reading, (databaseError, databaseReference) -> {
+            if (databaseError != null) {
+                System.err.println("Data could not be saved: " + databaseError.getMessage());
+            } else {
+                System.out.println("Data saved successfully under: " + databaseReference.getKey());
+            }
+        });
+    }
 
-        databaseRef.addListenerForSingleValueEvent(new ValueEventListener() {
-            @Override
-            public void onDataChange(DataSnapshot snapshot) {
-                if (snapshot.exists()) {
-                    for (DataSnapshot child : snapshot.getChildren()) {
-                        DeviceReading reading = parseDeviceReading(child);
-                        if (reading != null) {
-                            reading.setId(child.getKey());
-                            entries.add(reading);
+    // Method to get all readings from 'event' node
+    public Map<String, DeviceReading> getAllReadings() throws ExecutionException, InterruptedException {
+        CompletableFuture<Map<String, DeviceReading>> future = new CompletableFuture<>();
+
+        database.getReference("event")
+                .addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(DataSnapshot dataSnapshot) {
+                        Map<String, DeviceReading> readings = new HashMap<>();
+                        for (DataSnapshot childSnapshot : dataSnapshot.getChildren()) {
+                            readings.put(childSnapshot.getKey(), childSnapshot.getValue(DeviceReading.class));
                         }
+                        future.complete(readings);
                     }
-                }
-                future.complete(entries);
-                logger.info("Fetched {} entries from Firebase", entries.size());
-            }
 
-            @Override
-            public void onCancelled(DatabaseError error) {
-                logger.error("Error fetching data", error.toException());
-                future.complete(Collections.emptyList());
-            }
-        });
+                    @Override
+                    public void onCancelled(DatabaseError databaseError) {
+                        future.completeExceptionally(databaseError.toException());
+                    }
+                });
 
+        return future.get();
+    }
+
+    // Method to listen for new readings in real-time under 'event' node
+    public void listenForNewReadings() {
+        database.getReference("event")
+                .addChildEventListener(new ChildEventListener() {
+                    @Override
+                    public void onChildAdded(DataSnapshot dataSnapshot, String prevChildKey) {
+                        DeviceReading newReading = dataSnapshot.getValue(DeviceReading.class);
+                        System.out.println("New event detected - ID: " + dataSnapshot.getKey());
+                        System.out.println("Device: " + newReading.getDeviceId());
+                        System.out.println("Timestamp: " + newReading.getTimestamp());
+
+                        // Analyze the reading
+                        String result = analyzeReading(newReading);
+
+                        // Update status in Firebase
+                        dataSnapshot.getRef().child("status").setValue(result, (dbError, ref) -> {
+                            if (dbError == null) {
+                                System.out.println("Status updated to: " + result);
+                            }
+                        });
+                    }
+
+                    @Override public void onChildChanged(DataSnapshot dataSnapshot, String s) {}
+                    @Override public void onChildRemoved(DataSnapshot dataSnapshot) {}
+                    @Override public void onChildMoved(DataSnapshot dataSnapshot, String s) {}
+                    @Override public void onCancelled(DatabaseError databaseError) {
+                        System.err.println("Listener cancelled: " + databaseError.getMessage());
+                    }
+                });
+    }
+
+    // Enhanced accident detection logic
+    private String analyzeReading(DeviceReading reading) {
         try {
-            return future.get();
+            // Parse sensor values
+            double xG = Double.parseDouble(reading.getGforces().get("X"));
+            double yG = Double.parseDouble(reading.getGforces().get("Y"));
+            double zG = Double.parseDouble(reading.getGforces().get("Z"));
+            double xGyro = Double.parseDouble(reading.getGyro().get("X"));
+            double yGyro = Double.parseDouble(reading.getGyro().get("Y"));
+
+            // Check thresholds
+            boolean gForceTrigger = xG > 2.5 || yG > 3.0 || zG < 0.3 || zG > 2.0;
+            boolean gyroTrigger = Math.abs(xGyro) > 60 || Math.abs(yGyro) > 60;
+
+            if (gForceTrigger && gyroTrigger) {
+                System.out.println("ACCIDENT DETECTED!");
+                triggerEmergencyProtocol(reading);
+                return "ACCIDENT";
+            } else if (gForceTrigger) {
+                System.out.println("BUMP DETECTED");
+                return "BUMP";
+            } else {
+                return "NORMAL";
+            }
         } catch (Exception e) {
-            logger.error("Error waiting for data", e);
-            return Collections.emptyList();
+            System.err.println("Error analyzing reading: " + e.getMessage());
+            return "ERROR";
         }
     }
 
-    private DeviceReading parseDeviceReading(DataSnapshot snapshot) {
-        try {
-            DeviceReading reading = new DeviceReading();
-            reading.setDeviceId(snapshot.child("deviceId").getValue(String.class));
-            reading.setFireStatus(snapshot.child("fireStatus").getValue(String.class));
-            reading.setSpeed(snapshot.child("speed").getValue(String.class));
-
-            // Parse GForce
-            DataSnapshot gforceSnap = snapshot.child("gforces");
-            GForce gforce = new GForce();
-            gforce.setX(parseDouble(gforceSnap.child("X").getValue(String.class)));
-            gforce.setY(parseDouble(gforceSnap.child("Y").getValue(String.class)));
-            gforce.setZ(parseDouble(gforceSnap.child("Z").getValue(String.class)));
-            reading.setGforces(gforce);
-
-            // Parse Gyro
-            DataSnapshot gyroSnap = snapshot.child("gyro");
-            Gyro gyro = new Gyro();
-            gyro.setX(parseDouble(gyroSnap.child("X").getValue(String.class)));
-            gyro.setY(parseDouble(gyroSnap.child("Y").getValue(String.class)));
-            gyro.setZ(parseDouble(gyroSnap.child("Z").getValue(String.class)));
-            reading.setGyro(gyro);
-
-            // Parse Location
-            DataSnapshot locSnap = snapshot.child("location");
-            Location location = new Location();
-            location.setLat(parseDouble(locSnap.child("lat").getValue(String.class)));
-            location.setLng(parseDouble(locSnap.child("lng").getValue(String.class)));
-            reading.setLocation(location);
-
-            return reading;
-        } catch (Exception e) {
-            logger.error("Error parsing device reading", e);
-            return null;
-        }
-    }
-
-    private Double parseDouble(String value) {
-        try {
-            return (value == null || value.isEmpty()) ? 0.0 : Double.parseDouble(value);
-        } catch (NumberFormatException e) {
-            return 0.0;
-        }
-    }
-
-    public void updateStatus(String docId, AnalysisResult result) {
-        Map<String, Object> updates = new HashMap<>();
-        updates.put("status", result.getStatus());
-        updates.put("accidentType", result.getType());
-        updates.put("confidence", result.getConfidence());
-        updates.put("lastAnalyzed", ServerValue.TIMESTAMP);
-
-        databaseRef.child(docId).updateChildren(updates, (error, ref) -> {
-            if (error != null) {
-                logger.error("Error updating document status", error.toException());
-            }
-        });
+    private void triggerEmergencyProtocol(DeviceReading reading) {
+        System.out.println("Emergency protocol triggered for device: " + reading.getDeviceId());
+        System.out.println("Location: " + reading.getLocation().get("lat") + ", " + reading.getLocation().get("lng"));
     }
 }
