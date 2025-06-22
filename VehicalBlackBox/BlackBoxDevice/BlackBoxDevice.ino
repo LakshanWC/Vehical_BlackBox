@@ -28,7 +28,7 @@ void loop() {
   mpu.update();
 
   if(millis() - timer > 10){ // print data 
-    
+    Serial.print("Temp :");Serial.print(mpu.getTemp());
     Serial.print(F("ACCELERO  X: "));Serial.print(mpu.getAccX());
     Serial.print("\tY: ");Serial.print(mpu.getAccY());
     Serial.print("\tZ: ");Serial.println(mpu.getAccZ());
