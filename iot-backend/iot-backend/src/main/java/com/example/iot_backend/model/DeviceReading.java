@@ -11,7 +11,7 @@ public class DeviceReading {
     private String fireStatus;
     private String speed;
     private String status;
-
+//aaaa
     // Constructors, getters, and setters
     public DeviceReading() {}
 
