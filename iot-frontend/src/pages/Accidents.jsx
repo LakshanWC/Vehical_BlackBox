@@ -18,10 +18,10 @@ import {
 import {
     Warning as WarningIcon,
     Error as ErrorIcon,
-    CheckCircle as CheckCircleIcon,
-    AccessTime as TimeIcon,
+    Speed as SpeedIcon,
     LocationOn as LocationIcon,
-    OpenInNew as OpenInNewIcon
+    OpenInNew as OpenInNewIcon,
+    LocalFireDepartment as FireIcon
 } from '@mui/icons-material';
 import { database } from '../Firebase';
 import { ref, query, orderByChild, onValue } from 'firebase/database';
@@ -30,7 +30,6 @@ const Accidents = () => {
     const [incidents, setIncidents] = useState([]);
     const [loading, setLoading] = useState(true);
     const [tabValue, setTabValue] = useState(0);
-
     useEffect(() => {
         const dbRef = ref(database, 'event');
         const dbQuery = query(dbRef, orderByChild('timestamp'));
@@ -42,7 +41,10 @@ const Accidents = () => {
                 data.push({
                     id: childSnapshot.key,
                     ...incident,
-                    classification: classifyIncident(incident)
+                    timestamp: childSnapshot.key,
+                    classification: classifyIncident(incident),
+                    vehicleStatus: getVehicleStatus(incident),
+                    impactDirection: getImpactDirection(incident)
                 });
             });
             setIncidents(data.reverse());
@@ -53,7 +55,14 @@ const Accidents = () => {
     }, []);
 
     const classifyIncident = (incident) => {
-        if (!incident.gforces || !incident.gyro) return 'INVALID';
+        if (incident.fire === 1) return 'FIRE';
+
+        if (incident.speed) {
+            const speedValue = parseInt(incident.speed.replace(' km/h', '')) || 0;
+            if (speedValue > 60) return 'SPEEDING';
+        }
+
+        if (!incident.gforces || !incident.gyro) return 'OTHER';
 
         try {
             const xG = parseFloat(incident.gforces.X) || 0;
@@ -67,26 +76,49 @@ const Accidents = () => {
 
             if (gForceTrigger && gyroTrigger) return 'ACCIDENT';
             if (gForceTrigger) return 'BUMP';
-            return 'NORMAL';
+            return 'OTHER';
         } catch {
-            return 'INVALID';
+            return 'OTHER';
+        }
+    };
+
+    const getVehicleStatus = (incident) => {
+        if (!incident.gyro) return 'Normal';
+        try {
+            const xAngle = Math.abs(parseFloat(incident.gyro.X || 0));
+            const yAngle = Math.abs(parseFloat(incident.gyro.Y || 0));
+
+            if (xAngle > 90 || yAngle > 90) return 'Upside Down';
+            if (xAngle > 60 || yAngle > 60) return 'Rolled Over';
+            if (xAngle > 45 || yAngle > 45) return 'Tilted';
+            return 'Normal';
+        } catch {
+            return 'Unknown';
+        }
+    };
+
+    const getImpactDirection = (incident) => {
+        if (!incident.gforces) return 'Unknown';
+        try {
+            const xG = parseFloat(incident.gforces.X || 0);
+            const yG = parseFloat(incident.gforces.Y || 0);
+
+            if (Math.abs(xG) > Math.abs(yG)) {
+                return xG > 0 ? 'Right Side' : 'Left Side';
+            } else {
+                return yG > 0 ? 'Front' : 'Rear';
+            }
+        } catch {
+            return 'Unknown';
         }
     };
 
     const filteredIncidents = incidents.filter(incident => {
         if (tabValue === 0) return incident.classification === 'ACCIDENT';
         if (tabValue === 1) return incident.classification === 'BUMP';
-        return incident.classification === 'INVALID';
-    });
-
-    const recentIncidents = filteredIncidents.filter(incident => {
-        try {
-            const incidentDate = new Date(incident.timestamp);
-            const now = new Date();
-            return (now - incidentDate) <= 24 * 60 * 60 * 1000;
-        } catch {
-            return false;
-        }
+        if (tabValue === 2) return incident.classification === 'SPEEDING';
+        if (tabValue === 3) return incident.classification === 'FIRE';
+        return false;
     });
 
     if (loading) {
@@ -99,19 +131,21 @@ const Accidents = () => {
 
     return (
         <Box sx={{ p: 3 }}>
-            <Typography variant="h5" gutterBottom sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <WarningIcon color="error" /> Incident History
+            <Typography variant="h5" gutterBottom>
+                All Alerts
             </Typography>
 
-            <Paper sx={{ mb: 3, p: 2 }}>
+            <Paper sx={{ mb: 3 }}>
                 <Tabs
                     value={tabValue}
                     onChange={(_, newValue) => setTabValue(newValue)}
                     variant="fullWidth"
                 >
-                    <Tab label="Accidents" icon={<WarningIcon />} />
+                    <Tab label="Accidents" icon={<ErrorIcon color="error" />} />
                     <Tab label="Bumps" icon={<ErrorIcon color="warning" />} />
-                    <Tab label="Invalid Data" icon={<ErrorIcon color="disabled" />} />
+                    <Tab label="Speeding" icon={<SpeedIcon color="secondary" />} />
+                    <Tab label="Fire" icon={<FireIcon color="error" />} />
+
                 </Tabs>
             </Paper>
 
@@ -119,83 +153,83 @@ const Accidents = () => {
                 <TableHead>
                     <TableRow>
                         <TableCell>Device ID</TableCell>
-                        <TableCell>Timestamp</TableCell>
+                        <TableCell>Date</TableCell>
+                        <TableCell>Time</TableCell>
                         <TableCell>Location</TableCell>
-                        <TableCell>Classification</TableCell>
-                        <TableCell>Details</TableCell>
+                        <TableCell>Speed</TableCell>
+                        {(tabValue === 0 || tabValue === 1) && <TableCell>Status</TableCell>}
+                        {(tabValue === 0 || tabValue === 1) && <TableCell>Impact</TableCell>}
                     </TableRow>
                 </TableHead>
                 <TableBody>
-                    {recentIncidents.length > 0 ? (
-                        recentIncidents.map((incident) => (
+                    {filteredIncidents.length > 0 ? (
+                        filteredIncidents.map((incident) => (
                             <TableRow key={incident.id} hover>
                                 <TableCell>{incident.deviceId || 'N/A'}</TableCell>
                                 <TableCell>
-                                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                        <TimeIcon fontSize="small" />
-                                        {new Date(incident.timestamp).toLocaleString()}
-                                    </Box>
+                                    {incident.timestamp ?
+                                        new Date(incident.timestamp).toLocaleDateString('en-US', {
+                                            year: 'numeric',
+                                            month: 'short',
+                                            day: 'numeric'
+                                        }) :
+                                        'No Date'}
+                                </TableCell>
+                                <TableCell>
+                                    {incident.timestamp ?
+                                        new Date(incident.timestamp).toLocaleTimeString('en-US', {
+                                            hour: '2-digit',
+                                            minute: '2-digit',
+                                            second: '2-digit'
+                                        }) :
+                                        'No Time'}
                                 </TableCell>
                                 <TableCell>
                                     {incident.location && (
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                                            <LocationIcon fontSize="small" />
-                                            <Box>
-                                                <Tooltip
-                                                    title={`Raw coordinates: ${incident.location.lat}, ${incident.location.lng}`}
-                                                >
-                                                    <Typography variant="body2">
-                                                        {incident.address || "Fetching address..."}
-                                                    </Typography>
-                                                </Tooltip>
-                                                {incident.location.lat && incident.location.lng && (
-                                                    <Link
-                                                        href={`https://www.google.com/maps?q=${incident.location.lat},${incident.location.lng}`}
-                                                        target="_blank"
-                                                        rel="noopener"
-                                                        variant="caption"
-                                                        sx={{ display: 'flex', alignItems: 'center', mt: 0.5 }}
-                                                    >
-                                                        Open in Maps <OpenInNewIcon fontSize="inherit" sx={{ ml: 0.5 }} />
-                                                    </Link>
-                                                )}
-                                            </Box>
-                                        </Box>
+                                        <Link
+                                            href={`https://www.google.com/maps?q=${incident.location.lat},${incident.location.lng}`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            sx={{
+                                                display: 'flex',
+                                                alignItems: 'center',
+                                                textDecoration: 'none',
+                                                color: 'primary.main',
+                                                '&:hover': {
+                                                    textDecoration: 'underline'
+                                                }
+                                            }}
+                                        >
+                                            <LocationIcon fontSize="small" sx={{ mr: 1 }} />
+                                            {incident.address || 'View on Map'}
+                                            <OpenInNewIcon fontSize="small" sx={{ ml: 1 }} />
+                                        </Link>
                                     )}
                                 </TableCell>
-                                <TableCell>
-                                    <Chip
-                                        label={incident.classification}
-                                        color={
-                                            incident.classification === 'ACCIDENT' ? 'error' :
-                                                incident.classification === 'BUMP' ? 'warning' :
-                                                    'default'
-                                        }
-                                        icon={
-                                            incident.classification === 'ACCIDENT' ? <WarningIcon /> :
-                                                incident.classification === 'BUMP' ? <ErrorIcon /> :
-                                                    <CheckCircleIcon />
-                                        }
-                                    />
-                                </TableCell>
-                                <TableCell>
-                                    {incident.gforces && (
-                                        <Box component="span" sx={{ mr: 2 }}>
-                                            <strong>G-Forces:</strong> X={incident.gforces.X || 'N/A'}, Y={incident.gforces.Y || 'N/A'}, Z={incident.gforces.Z || 'N/A'}
-                                        </Box>
-                                    )}
-                                    {incident.gyro && (
-                                        <Box component="span">
-                                            <strong>Gyro:</strong> X={incident.gyro.X || 'N/A'}, Y={incident.gyro.Y || 'N/A'}
-                                        </Box>
-                                    )}
-                                </TableCell>
+                                <TableCell>{incident.speed || 'N/A'} km/h</TableCell>
+                                {(tabValue === 0 || tabValue === 1) && (
+                                    <TableCell>
+                                        <Chip
+                                            label={incident.vehicleStatus}
+                                            size="small"
+                                            color={
+                                                incident.vehicleStatus === 'Normal' ? 'success' :
+                                                    incident.vehicleStatus === 'Upside Down' ? 'error' : 'warning'
+                                            }
+                                        />
+                                    </TableCell>
+                                )}
+                                {(tabValue === 0 || tabValue === 1) && (
+                                    <TableCell>{incident.impactDirection}</TableCell>
+                                )}
                             </TableRow>
                         ))
                     ) : (
                         <TableRow>
-                            <TableCell colSpan={5} align="center">
-                                No {tabValue === 0 ? 'accidents' : tabValue === 1 ? 'bumps' : 'invalid data'} found in the last 24 hours.
+                            <TableCell colSpan={(tabValue === 2 || tabValue === 3) ? 5 : 7} align="center">
+                                No {tabValue === 0 ? 'accidents' :
+                                tabValue === 1 ? 'bumps' :
+                                    tabValue === 2 ? 'speeding violations' : 'fire alerts'} found
                             </TableCell>
                         </TableRow>
                     )}
