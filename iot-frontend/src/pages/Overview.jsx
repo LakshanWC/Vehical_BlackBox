@@ -11,21 +11,32 @@ const Overview = () => {
     useEffect(() => {
         const alertsRef = ref(database, 'event');
         const unsubscribe = onValue(alertsRef, (snapshot) => {
-            const data = snapshot.val();
-            const alerts = [];
+            const data = [];
+            const now = new Date();
 
-            for (const timestamp in data) {
-                if (data.hasOwnProperty(timestamp)) {
-                    alerts.push({
-                        ...data[timestamp],
-                        timestamp: timestamp,
-                        id: timestamp,
-                        classification: classifyAlert(data[timestamp])
-                    });
+            snapshot.forEach((childSnapshot) => {
+                const alertData = childSnapshot.val();
+                const alertDate = new Date(childSnapshot.key);
+                const hoursDiff = (now - alertDate) / (1000 * 60 * 60);
+
+                if (hoursDiff <= 72) {
+                    const classification = classifyAlert(alertData);
+                    const isSpeedViolation = checkSpeedViolation(alertData);
+                    const isFireAlert = checkFireAlert(alertData);
+
+
+                    if (classification !== 'NORMAL' || isSpeedViolation) {
+                        data.push({
+                            ...alertData,
+                            id: childSnapshot.key,
+                            timestamp: childSnapshot.key,
+                            classification: isFireAlert ? 'FIRE' :
+                                isSpeedViolation ? 'SPEEDING' : classification
+                        });
+                    }
                 }
-            }
-
-            setRealtimeAlerts(alerts);
+            });
+            setRealtimeAlerts(data.reverse());
         });
 
         return () => unsubscribe();
@@ -50,6 +61,14 @@ const Overview = () => {
         } catch {
             return 'INVALID';
         }
+    };
+    const checkFireAlert = (alert) => {
+        return alert.fire === 1; // 1 means fire detected
+    };
+    const checkSpeedViolation = (alert) => {
+        if (!alert.speed) return false;
+        const speedValue = parseInt(alert.speed.replace(' km/h', ''));
+        return speedValue > 60;
     };
 
     const filteredAlerts = realtimeAlerts.filter(alert => {
