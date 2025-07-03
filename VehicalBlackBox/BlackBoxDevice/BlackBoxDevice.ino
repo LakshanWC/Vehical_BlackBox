@@ -2,14 +2,16 @@
 #include <MPU6050_light.h>
 #include <ESP8266WiFi.h>
 #include <FirebaseESP8266.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
 
 // Wi-Fi Credentials 
 #define WIFI_SSID "POCO M3"
 #define WIFI_PASSWORD "12345678"
 
 // Firebase Config 
-#define FIREBASE_HOST "---------------------------"       
-#define FIREBASE_AUTH "---------------------------"                    
+#define FIREBASE_HOST "------------------"       
+#define FIREBASE_AUTH "-------------------"                    
 
 FirebaseData firebaseData;
 FirebaseConfig config;
@@ -21,6 +23,26 @@ const int FIRE_SENSOR_PIN = D5;
 // MPU6050 Setup 
 MPU6050 mpu(Wire);
 unsigned long sensorTimer = 0;
+
+// NTP Setup
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 19800, 60000); // 19800 = GMT+5:30 for Sri Lanka
+
+String getISOTime() {
+  time_t rawTime = timeClient.getEpochTime();
+  struct tm* timeInfo = gmtime(&rawTime); // Get UTC time
+
+  char buffer[25];
+  sprintf(buffer, "%04d-%02d-%02dT%02d:%02d:%02dZ", 
+          timeInfo->tm_year + 1900,
+          timeInfo->tm_mon + 1,
+          timeInfo->tm_mday,
+          timeInfo->tm_hour,
+          timeInfo->tm_min,
+          timeInfo->tm_sec);
+
+  return String(buffer);
+}
 
 void setup() {
   Serial.begin(9600);
@@ -36,14 +58,23 @@ void setup() {
   }
   Serial.println("\nConnected to Wi-Fi!");
 
+  // Start NTP
+  timeClient.begin();
+  while (!timeClient.update()) {
+    timeClient.forceUpdate();
+  }
+
   // Firebase configuration
   config.host = FIREBASE_HOST;
   config.signer.tokens.legacy_token = FIREBASE_AUTH;
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
 
-  // Send data to insde event node
-  if (Firebase.setString(firebaseData, "/event/testMessage", "Device started")) {
+  // Get current time in ISO format
+  String dateTime = getISOTime();
+
+  // Send to Firebase under /event/<timestamp>
+  if (Firebase.setString(firebaseData, "/event/" + dateTime, "Device started")) {
     Serial.println("Firebase message sent!");
   } else {
     Serial.print("Firebase error: ");
@@ -95,6 +126,6 @@ void loop() {
 
     sensorTimer = millis();
   }
-
+  timeClient.update();
   delay(1);
 }
