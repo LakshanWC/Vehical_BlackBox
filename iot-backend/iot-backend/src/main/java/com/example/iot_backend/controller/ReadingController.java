@@ -1,14 +1,13 @@
 package com.example.iot_backend.controller;
 
-
-
 import com.example.iot_backend.model.DeviceReading;
 import com.example.iot_backend.service.FirebaseService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.Map;
-//aaa
+import java.util.concurrent.CompletableFuture;
+
 @RestController
 @RequestMapping("/api/events")
 public class ReadingController {
@@ -27,13 +26,10 @@ public class ReadingController {
     }
 
     @GetMapping
-    public ResponseEntity<Map<String, DeviceReading>> getAllEvents() {
-        try {
-            Map<String, DeviceReading> events = firebaseService.getAllReadings();
-            return ResponseEntity.ok(events);
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError().body(null);
-        }
+    public CompletableFuture<ResponseEntity<Map<String, DeviceReading>>> getAllEvents() {
+        return firebaseService.getAllReadings()
+                .thenApply(ResponseEntity::ok)
+                .exceptionally(e -> ResponseEntity.internalServerError().build());
     }
 
     @GetMapping("/start-monitoring")
@@ -49,8 +45,6 @@ public class ReadingController {
 
     @GetMapping("/{eventId}")
     public ResponseEntity<DeviceReading> getEventById(@PathVariable String eventId) {
-        // Implementation to get specific event by ID
-        // You would use database.getReference("event").child(eventId).addListenerForSingleValueEvent(...)
         return ResponseEntity.notFound().build();
     }
 }

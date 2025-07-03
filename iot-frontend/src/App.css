@@ -1,0 +1,10 @@
+.leaflet-container {
+    height: 100%;
+    width: 100%;
+    border-radius: 8px;
+}
+
+.custom-marker {
+    background: transparent;
+    border: none;
+}
