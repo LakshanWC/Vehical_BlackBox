@@ -1,66 +1,176 @@
 #include <Wire.h>
 #include <MPU6050_light.h>
 #include <ESP8266WiFi.h>
+#include <FirebaseESP8266.h>
+#include <NTPClient.h>
+#include <WiFiUdp.h>
+#include <TinyGPS++.h>
+#include <SoftwareSerial.h>
 
-// Wi-Fi credentials
-const char* ssid = "SSID";
-const char* password = "PASSWORD";
+// Device name
+const char* deviceId = "ESP12E_001";
 
-// Fire sensor digital pin (D5 on NodeMCU = GPIO14)
+// Default values
+int fireStatus = 0;
+String lat = "e";
+String lng = "e";
+String speed = "e";
+
+// Wi-Fi Credentials 
+#define WIFI_SSID "POCO M3"
+#define WIFI_PASSWORD "12345678"
+
+// Firebase Config 
+#define FIREBASE_HOST "--------------"       
+#define FIREBASE_AUTH "--------------"                    
+
+FirebaseData firebaseData;
+FirebaseConfig config;
+FirebaseAuth auth;
+FirebaseJson json;
+
+// Fire Sensor Pin
 const int FIRE_SENSOR_PIN = D5;
 
+// MPU6050 Setup 
 MPU6050 mpu(Wire);
-unsigned long timer = 0;
+unsigned long sensorTimer = 0;
+
+// NTP Setup
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP, "pool.ntp.org", 19800, 60000); // GMT+5:30
+
+// GPS Setup
+TinyGPSPlus gps;
+SoftwareSerial gpsSerial(D6, D7); // RX, TX
+
+// Timing for Firebase sending
+unsigned long lastSendTime = 0;
+const unsigned long sendInterval = 1000; // 1 second
+
+String getISOTime() {
+  time_t rawTime = timeClient.getEpochTime();
+  struct tm* timeInfo = gmtime(&rawTime);
+  char buffer[25];
+  sprintf(buffer, "%04d-%02d-%02dT%02d:%02d:%02dZ", 
+          timeInfo->tm_year + 1900,
+          timeInfo->tm_mon + 1,
+          timeInfo->tm_mday,
+          timeInfo->tm_hour,
+          timeInfo->tm_min,
+          timeInfo->tm_sec);
+  return String(buffer);
+}
 
 void setup() {
   Serial.begin(9600);
+  gpsSerial.begin(9600);
   Wire.begin();
-
-  // Setup fire sensor pin
   pinMode(FIRE_SENSOR_PIN, INPUT);
 
-  // Connect to Wi-Fi
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi");
+  // WiFi
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to Wi-Fi");
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
   }
-  Serial.println("\nConnected to WiFi!");
-  Serial.print("IP Address: ");
-  Serial.println(WiFi.localIP());
+  Serial.println("\nConnected to Wi-Fi!");
 
-  // Initialize MPU6050
+  // NTP
+  timeClient.begin();
+  while (!timeClient.update()) timeClient.forceUpdate();
+
+  // Firebase
+  config.host = FIREBASE_HOST;
+  config.signer.tokens.legacy_token = FIREBASE_AUTH;
+  Firebase.begin(&config, &auth);
+  Firebase.reconnectWiFi(true);
+
+  // MPU6050
   byte status = mpu.begin();
   Serial.print(F("MPU6050 status: "));
   Serial.println(status);
-  while (status != 0) {}  // Stop if connection failed
-
-  Serial.println(F("Calculating offsets, do not move MPU6050"));
+  while (status != 0) {
+    Serial.println("MPU6050 failed. Retrying in 2 seconds...");
+    delay(2000);
+    status = mpu.begin();
+  }
+  Serial.println(F("Calculating offsets... Don't move MPU6050"));
   delay(1000);
   mpu.calcOffsets(true, true);
-  Serial.println("Done!\n");
+  Serial.println("MPU6050 Ready!\n");
+
+  Serial.println("GPS is Connecting to satellites...");
 }
 
 void loop() {
   mpu.update();
 
-  if ((millis() - timer) > 10) {
-    Serial.print("X : "); Serial.print(mpu.getAngleX());
-    Serial.print("\tY : "); Serial.print(mpu.getAngleY());
-    Serial.print("\tZ : "); Serial.println(mpu.getAngleZ());
-
-    Serial.print(F("ACCELERO  X: ")); Serial.print(mpu.getAccX());
-    Serial.print("\tY: "); Serial.print(mpu.getAccY());
-    Serial.print("\tZ: "); Serial.println(mpu.getAccZ());
-
-    // Fire detection
-    if (digitalRead(FIRE_SENSOR_PIN) == LOW) {
-      Serial.println("🔥 Fire Detected!");
-    }
-
-    timer = millis();
+  // Sensor data update every 10 ms
+  if ((millis() - sensorTimer) > 10) {
+    fireStatus = (digitalRead(FIRE_SENSOR_PIN) == LOW) ? 1 : 0;
+    sensorTimer = millis();
   }
 
-  delay(1);
+  // GPS Handling
+  while (gpsSerial.available()) {
+    char c = gpsSerial.read();
+    gps.encode(c);
+
+    if (gps.location.isUpdated()) {
+      lat = String(gps.location.lat(), 6);
+      lng = String(gps.location.lng(), 6);
+      speed = String(gps.speed.kmph());
+    }
+  }
+
+  timeClient.update();
+
+  // Send data every 1 second
+  if (millis() - lastSendTime >= sendInterval) {
+    sendDataToFirebase();
+    lastSendTime = millis();
+  }
+}
+
+void sendDataToFirebase() {
+  json.clear(); // Clear previous data
+
+  json.set("deviceId", deviceId);
+  json.set("fireStatus", fireStatus);
+
+  // gforces (acceleration)
+  FirebaseJson gforces;
+  gforces.set("X", String(mpu.getAccX()));
+  gforces.set("Y", String(mpu.getAccY()));
+  gforces.set("Z", String(mpu.getAccZ()));
+  json.set("gforces", gforces);
+
+  // gyro
+  FirebaseJson gyro;
+  gyro.set("X", String(mpu.getGyroX()));
+  gyro.set("Y", String(mpu.getGyroY()));
+  gyro.set("Z", String(mpu.getGyroZ()));
+  json.set("gyro", gyro);
+
+  // GPS location
+  FirebaseJson gpsjson;
+  gpsjson.set("lat", lat);
+  gpsjson.set("lng", lng);
+  json.set("location", gpsjson);
+
+  json.set("speed", speed);
+  json.set("address", "");
+  json.set("status", "");
+
+  String dateTime = getISOTime();
+  String path = "/event/" + dateTime;
+
+  if (Firebase.setJSON(firebaseData, path, json)) {
+    Serial.println("✅ Data sent successfully");
+  } else {
+    Serial.print("❌ Firebase send error: ");
+    Serial.println(firebaseData.errorReason());
+  }
 }
