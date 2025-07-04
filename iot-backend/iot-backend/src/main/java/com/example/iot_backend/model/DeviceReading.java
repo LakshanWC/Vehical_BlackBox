@@ -1,5 +1,6 @@
 package com.example.iot_backend.model;
 
+import java.util.Collections;
 import java.util.Map;
 
 public class DeviceReading {
@@ -14,7 +15,9 @@ public class DeviceReading {
     private String speed;
     private String status;
     private String address;
-    private Map<String, Object> mapData;  // Map visualization specific data
+    private Map<String, Object> mapData;
+    private Map<String, String> emergencyContacts;
+    private String ownerEmail;
 
     // Constructors
     public DeviceReading() {}
@@ -127,6 +130,21 @@ public class DeviceReading {
 
     public void setMapData(Map<String, Object> mapData) {
         this.mapData = mapData;
+    }
+    public Map<String, String> getEmergencyContacts() {
+        return emergencyContacts != null ? emergencyContacts : Collections.emptyMap();
+    }
+
+    public void setEmergencyContacts(Map<String, String> emergencyContacts) {
+        this.emergencyContacts = emergencyContacts;
+    }
+
+    public String getOwnerEmail() {
+        return ownerEmail;
+    }
+
+    public void setOwnerEmail(String ownerEmail) {
+        this.ownerEmail = ownerEmail;
     }
 
     // Helper methods
