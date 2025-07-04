@@ -7,14 +7,14 @@
 #include <TinyGPS++.h>
 #include <SoftwareSerial.h>
 
-//Device name
-const char* deviceId ="ESP12E_001";
+// Device name
+const char* deviceId = "ESP12E_001";
 
-//defalut values
+// Default values
 int fireStatus = 0;
 String lat = "e";
 String lng = "e";
-String speed ="e";
+String speed = "e";
 
 // Wi-Fi Credentials 
 #define WIFI_SSID "POCO M3"
@@ -44,6 +44,10 @@ NTPClient timeClient(ntpUDP, "pool.ntp.org", 19800, 60000); // GMT+5:30
 TinyGPSPlus gps;
 SoftwareSerial gpsSerial(D6, D7); // RX, TX
 
+// Timing for Firebase sending
+unsigned long lastSendTime = 0;
+const unsigned long sendInterval = 1000; // 1 second
+
 String getISOTime() {
   time_t rawTime = timeClient.getEpochTime();
   struct tm* timeInfo = gmtime(&rawTime);
@@ -56,7 +60,6 @@ String getISOTime() {
           timeInfo->tm_hour,
           timeInfo->tm_min,
           timeInfo->tm_sec);
-
   return String(buffer);
 }
 
@@ -161,6 +164,20 @@ void loop() {
   }
 
   timeClient.update();
+  
+  // Send data every 1 second
+  if (millis() - lastSendTime >= sendInterval) {
+    sendDataToFirebase();
+    lastSendTime = millis();
+  }
+}
+
+void sendDataToFirebase() {
+  json.clear(); // Clear previous data
+
+  json.set("deviceId", deviceId);
+  json.set("fireStatus", fireStatus);
+
   delay(10000);
 }
 
@@ -183,28 +200,23 @@ void sendDataToFirebase(){
   gyro.set("Z", String(mpu.getGyroZ()));
   json.set("gyro", gyro);
 
-  //gps location
+  // GPS location
   FirebaseJson gpsjson;
-  gpsjson.set("lat",lat);
-  gpsjson.set("lng",lng);
-  json.set("location",gpsjson);
+  gpsjson.set("lat", lat);
+  gpsjson.set("lng", lng);
+  json.set("location", gpsjson);
 
-  //speed
-  json.set("speed",speed);
-  //fire
-  json.set("fireStatus",fireStatus);
-  //address
-  json.set("address","");
-  //status
-  json.set("status","");
+  json.set("speed", speed);
+  json.set("address", "");
+  json.set("status", "");
 
   String dateTime = getISOTime();
   String path = "/event/" + dateTime;
-  
+
   if (Firebase.setJSON(firebaseData, path, json)) {
-    Serial.println("Data sent successfully");
+    Serial.println("✅ Data sent successfully");
   } else {
-    Serial.print("Firebase send error: ");
+    Serial.print("❌ Firebase send error: ");
     Serial.println(firebaseData.errorReason());
   }
 }
