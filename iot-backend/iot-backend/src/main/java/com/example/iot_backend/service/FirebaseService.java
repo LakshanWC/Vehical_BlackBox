@@ -2,11 +2,12 @@ package com.example.iot_backend.service;
 
 import com.example.iot_backend.model.DeviceReading;
 import com.google.firebase.database.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
@@ -16,38 +17,25 @@ import java.util.concurrent.Executors;
 public class FirebaseService {
 
     private final FirebaseDatabase database;
-    private final GeocodingService geocodingService;
+    private final EmailService emailService;
     private DatabaseReference eventsRef;
-    // Add this with your other class members
+    private DatabaseReference rootRef;
     private final Executor executor = Executors.newFixedThreadPool(4);
+    private static final Logger logger = LoggerFactory.getLogger(FirebaseService.class);
 
     @Autowired
-    public FirebaseService(GeocodingService geocodingService) {
+    public FirebaseService(EmailService emailService) {
         this.database = FirebaseDatabase.getInstance();
-        this.geocodingService = geocodingService;
+        this.emailService = emailService;
         this.eventsRef = database.getReference("events");
+        this.rootRef = database.getReference("/");
     }
 
     public void saveDeviceReading(DeviceReading reading) {
         DatabaseReference newEventRef = eventsRef.push();
-        reading.setId(newEventRef.getKey()); // Set the generated ID in the model
-
-        // Enhanced location data structure
-        if (reading.getLocation() != null) {
-            Map<String, Object> locationData = new HashMap<>();
-            locationData.put("coordinates", reading.getLocation());
-
-            // Fixed the generateGeoHash call with proper parenthesis
-            locationData.put("geoHash", generateGeoHash(
-                    Double.parseDouble(reading.getLocation().get("lat")),
-                    Double.parseDouble(reading.getLocation().get("lng"))
-            ));
-            reading.setLocationData(locationData);
-        }
-
+        reading.setId(newEventRef.getKey());
         newEventRef.setValueAsync(reading)
-                .addListener(() -> System.out.println("Data saved successfully under: " + newEventRef.getKey()),
-                        executor);
+                .addListener(() -> System.out.println("Data saved under: " + newEventRef.getKey()), executor);
     }
 
     public CompletableFuture<Map<String, DeviceReading>> getAllReadings() {
@@ -96,88 +84,59 @@ public class FirebaseService {
         DeviceReading reading = snapshot.getValue(DeviceReading.class);
         if (reading == null) return;
 
-        // 1. Analyze and classify
-        String status = analyzeReading(reading);
-        snapshot.getRef().child("status").setValueAsync(status);
+        // Get emergency contacts and owner email from root
+        rootRef.child("emergencyContacts").addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot contactsSnapshot) {
+                if (contactsSnapshot.exists()) {
+                    reading.setEmergencyContacts((Map<String, String>) contactsSnapshot.getValue());
+                }
 
-        // 2. Process location data for mapping
-        if (reading.getLocation() != null) {
-            Map<String, Object> mapData = new HashMap<>();
-            mapData.put("lat", reading.getLocation().get("lat"));
-            mapData.put("lng", reading.getLocation().get("lng"));
-            mapData.put("zoom", calculateZoomLevel(reading));
+                rootRef.child("ownerEmail").addListenerForSingleValueEvent(new ValueEventListener() {
+                    @Override
+                    public void onDataChange(DataSnapshot emailSnapshot) {
+                        if (emailSnapshot.exists()) {
+                            reading.setOwnerEmail(emailSnapshot.getValue(String.class));
+                        }
+                        analyzeAndAlert(reading, snapshot);
+                    }
 
-            // Add marker styling based on classification
-            mapData.put("markerColor", getMarkerColor(status));
-            mapData.put("markerSize", getMarkerSize(reading));
-
-            snapshot.getRef().child("mapData").setValueAsync(mapData);
-
-            // 3. Geocode for important events
-            if (status.equals("ACCIDENT")) {
-                CompletableFuture.runAsync(() -> {
-                    String address = geocodingService.reverseGeocodeWithRetry(
-                            reading.getLocation().get("lat"),
-                            reading.getLocation().get("lng"),
-                            3
-                    );
-                    if (address != null) {
-                        snapshot.getRef().child("address").setValueAsync(address);
+                    @Override
+                    public void onCancelled(DatabaseError error) {
+                        analyzeAndAlert(reading, snapshot);
                     }
                 });
             }
-        }
+
+            @Override
+            public void onCancelled(DatabaseError error) {
+                analyzeAndAlert(reading, snapshot);
+            }
+        });
     }
 
-    private String generateGeoHash(double lat, double lng) {
-        // Implement geo-hashing for spatial queries
-        // Can use libraries like 'ch.hsr.geohash' or simple implementation
-        return String.format("%.4f,%.4f", lat, lng);
-    }
-
-    private String calculateZoomLevel(DeviceReading reading) {
-        // Dynamic zoom based on event type
-        return reading.getStatus().equals("ACCIDENT") ? "17" : "15";
-    }
-
-    private String getMarkerColor(String status) {
-        return switch (status) {
-            case "ACCIDENT" -> "#ff0000";
-            case "BUMP" -> "#ffa500";
-            case "NORMAL" -> "#00ff00";
-            default -> "#808080";
-        };
-    }
-
-    private int getMarkerSize(DeviceReading reading) {
-        try {
-            double impact = Double.parseDouble(reading.getGforces().get("Y"));
-            return (int) Math.min(30, Math.max(10, impact * 5));
-        } catch (Exception e) {
-            return 15;
-        }
+    private void analyzeAndAlert(DeviceReading reading, DataSnapshot snapshot) {
+        String status = analyzeReading(reading);
+        snapshot.getRef().child("status").setValueAsync(status);
     }
 
     private String analyzeReading(DeviceReading reading) {
         try {
-            if (!isValidSensorReading(reading)) {
-                return "ERROR";
+            boolean isFire = "1".equals(reading.getFireStatus());
+            boolean isAccident = false;
+
+            if (reading.getGforces() != null) {
+                double xG = parseDoubleSafe(reading.getGforces().get("X"));
+                double yG = parseDoubleSafe(reading.getGforces().get("Y"));
+                isAccident = xG > 2.5 || yG > 3.0;
             }
 
-            double xG = Double.parseDouble(reading.getGforces().get("X"));
-            double yG = Double.parseDouble(reading.getGforces().get("Y"));
-            double zG = Double.parseDouble(reading.getGforces().get("Z"));
-            double xGyro = Double.parseDouble(reading.getGyro().get("X"));
-            double yGyro = Double.parseDouble(reading.getGyro().get("Y"));
-
-            boolean gForceTrigger = xG > 2.5 || yG > 3.0 || zG < 0.3 || zG > 2.0;
-            boolean gyroTrigger = Math.abs(xGyro) > 60 || Math.abs(yGyro) > 60;
-
-            if (gForceTrigger && gyroTrigger) {
-                triggerEmergencyProtocol(reading);
+            if (isFire) {
+                triggerEmergencyProtocol(reading, "FIRE");
+                return "FIRE";
+            } else if (isAccident) {
+                triggerEmergencyProtocol(reading, "ACCIDENT");
                 return "ACCIDENT";
-            } else if (gForceTrigger) {
-                return "BUMP";
             }
             return "NORMAL";
         } catch (Exception e) {
@@ -185,22 +144,168 @@ public class FirebaseService {
         }
     }
 
-    private boolean isValidSensorReading(DeviceReading reading) {
+    private double parseDoubleSafe(String value) {
+        if (value == null || value.isEmpty()) return 0.0;
         try {
-            double x = Double.parseDouble(reading.getGforces().get("X"));
-            double y = Double.parseDouble(reading.getGforces().get("Y"));
-            return x >= -20 && x <= 20 && y >= -20 && y <= 20;
-        } catch (Exception e) {
-            return false;
+            return Double.parseDouble(value);
+        } catch (NumberFormatException e) {
+            return 0.0;
         }
     }
 
-    private void triggerEmergencyProtocol(DeviceReading reading) {
-        System.out.println("Emergency alert for device: " + reading.getDeviceId());
-        if (reading.getLocation() != null) {
-            System.out.println("Location: " +
-                    reading.getLocation().get("lat") + "," +
-                    reading.getLocation().get("lng"));
+    private void triggerEmergencyProtocol(DeviceReading reading, String alertType) {
+        try {
+            List<String> recipients = new ArrayList<>();
+
+            // Add owner email if exists
+            if (reading.getOwnerEmail() != null && !reading.getOwnerEmail().isEmpty()) {
+                recipients.add(reading.getOwnerEmail());
+            }
+
+            // Add emergency contacts if exists
+            if (reading.getEmergencyContacts() != null) {
+                recipients.addAll(reading.getEmergencyContacts().values());
+            }
+
+            // Remove duplicates and empty emails
+            recipients = recipients.stream()
+                    .filter(email -> email != null && !email.isEmpty())
+                    .distinct()
+                    .toList();
+
+            if (recipients.isEmpty()) {
+                logger.warn("No valid recipients found for alert");
+                return;
+            }
+
+            String subject = "🚨 " + alertType + " Alert - Device: " + reading.getDeviceId();
+            String content = buildAlertContent(reading, alertType);
+
+            // Send to all recipients
+            recipients.forEach(email -> {
+                try {
+                    emailService.sendEmergencyAlert(email, subject, content);
+                    logger.info("Alert sent to: {}", email);
+
+                    // Add a small delay between emails to avoid rate limiting
+                    Thread.sleep(200);
+                } catch (Exception e) {
+                    logger.error("Failed to send alert to {}: {}", email, e.getMessage());
+                }
+            });
+        } catch (Exception e) {
+            logger.error("Error triggering emergency protocol: {}", e.getMessage());
         }
+    }
+
+    private String buildAlertContent(DeviceReading reading, String alertType) {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=== ").append(alertType).append(" ALERT ===\n\n");
+        sb.append("Device ID: ").append(reading.getDeviceId()).append("\n");
+        sb.append("Timestamp: ").append(reading.getTimestamp()).append("\n");
+
+        if (reading.getLocation() != null) {
+            sb.append("Location Coordinates: ")
+                    .append(reading.getLocation().get("lat"))
+                    .append(", ")
+                    .append(reading.getLocation().get("lng"))
+                    .append("\n");
+
+            // Add Google Maps link
+            sb.append("Google Maps: https://www.google.com/maps?q=")
+                    .append(reading.getLocation().get("lat"))
+                    .append(",")
+                    .append(reading.getLocation().get("lng"))
+                    .append("\n");
+        }
+
+        if (reading.getGforces() != null) {
+            sb.append("\nImpact Forces:\n")
+                    .append("- X: ").append(reading.getGforces().get("X")).append("G (Side impact)\n")
+                    .append("- Y: ").append(reading.getGforces().get("Y")).append("G (Frontal/rear impact)\n")
+                    .append("- Z: ").append(reading.getGforces().get("Z")).append("G (Vertical force)\n");
+        }
+
+        if (reading.getGyro() != null) {
+            sb.append("\nVehicle Orientation:\n")
+                    .append("- X: ").append(reading.getGyro().get("X")).append("° (Roll)\n")
+                    .append("- Y: ").append(reading.getGyro().get("Y")).append("° (Pitch)\n")
+                    .append("- Z: ").append(reading.getGyro().get("Z")).append("° (Yaw)\n");
+        }
+
+        sb.append("\nSpeed: ").append(reading.getSpeed() != null ? reading.getSpeed() : "N/A").append(" km/h\n");
+        sb.append("\n=== END OF ALERT ===\n");
+        sb.append("\nPlease take immediate action and contact emergency services if needed.");
+
+        return sb.toString();
+    }
+
+    public CompletableFuture<DeviceReading> getReadingById(String eventId) {
+        CompletableFuture<DeviceReading> future = new CompletableFuture<>();
+
+        eventsRef.child(eventId).addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot snapshot) {
+                if (snapshot.exists()) {
+                    DeviceReading reading = snapshot.getValue(DeviceReading.class);
+
+                    // Get contacts and owner email from root
+                    rootRef.child("emergencyContacts").addListenerForSingleValueEvent(new ValueEventListener() {
+                        @Override
+                        public void onDataChange(DataSnapshot contactsSnapshot) {
+                            if (contactsSnapshot.exists()) {
+                                reading.setEmergencyContacts((Map<String, String>) contactsSnapshot.getValue());
+                            }
+
+                            rootRef.child("ownerEmail").addListenerForSingleValueEvent(new ValueEventListener() {
+                                @Override
+                                public void onDataChange(DataSnapshot emailSnapshot) {
+                                    if (emailSnapshot.exists()) {
+                                        reading.setOwnerEmail(emailSnapshot.getValue(String.class));
+                                    }
+                                    future.complete(reading);
+                                }
+
+                                @Override
+                                public void onCancelled(DatabaseError error) {
+                                    future.complete(reading);
+                                }
+                            });
+                        }
+
+                        @Override
+                        public void onCancelled(DatabaseError error) {
+                            future.complete(reading);
+                        }
+                    });
+                } else {
+                    future.complete(null);
+                }
+            }
+
+            @Override
+            public void onCancelled(DatabaseError error) {
+                future.completeExceptionally(error.toException());
+            }
+        });
+
+        return future;
+    }
+    public void retriggerAlertsForPastAccidents() {
+        eventsRef.addListenerForSingleValueEvent(new ValueEventListener() {
+            @Override
+            public void onDataChange(DataSnapshot dataSnapshot) {
+                for (DataSnapshot snapshot : dataSnapshot.getChildren()) {
+                    DeviceReading reading = snapshot.getValue(DeviceReading.class);
+                    if (reading != null && ("ACCIDENT".equals(reading.getStatus()) || "FIRE".equals(reading.getStatus()))) {
+                        triggerEmergencyProtocol(reading, reading.getStatus());
+                    }
+                }
+            }
+            @Override
+            public void onCancelled(DatabaseError error) {
+                logger.error("Failed to load past accidents: {}", error.getMessage());
+            }
+        });
     }
 }

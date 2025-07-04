@@ -10,6 +10,8 @@ const char* ssid = "POCO M3";
 const char* password = "12345678";
 
 // ==== Firebase Realtime DB config ====
+const char* FIREBASE_HOST = "------------------";
+const char* FIREBASE_SECRET = "------------------------------------";
 
 // ==== NTP time config ====
 const char* ntpServer = "pool.ntp.org";

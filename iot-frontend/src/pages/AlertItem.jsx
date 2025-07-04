@@ -98,6 +98,7 @@ const AlertItem = ({ alert }) => {
         }
     };
 
+
     const { direction, type } = analyzeImpact();
     const vehicleStatus = getVehicleStatus();
     const formattedTime = formatUTCTimestamp(alert.timestamp);
