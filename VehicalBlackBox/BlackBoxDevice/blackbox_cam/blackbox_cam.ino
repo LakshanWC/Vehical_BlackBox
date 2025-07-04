@@ -132,7 +132,6 @@ void setup() {
     Serial.print(".");
   }
   Serial.println("\nWiFi connected");
-  WiFi.setSleep(true);
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
 
@@ -163,5 +162,5 @@ void loop() {
   // Upload to Firebase
   uploadToFirebase(imageBase64, timestamp);
 
-  delay(3000); // Wait 3 seconds before next capture
+  delay(30000); // Wait 30 seconds before next capture
 }
