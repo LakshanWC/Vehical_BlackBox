@@ -47,4 +47,10 @@ public class ReadingController {
     public ResponseEntity<DeviceReading> getEventById(@PathVariable String eventId) {
         return ResponseEntity.notFound().build();
     }
+    @GetMapping("/retrigger-alerts")
+    public ResponseEntity<String> retriggerAlerts() {
+        firebaseService.retriggerAlertsForPastAccidents();
+        return ResponseEntity.ok("Re-processing past accidents for email alerts");
+    }
+
 }
