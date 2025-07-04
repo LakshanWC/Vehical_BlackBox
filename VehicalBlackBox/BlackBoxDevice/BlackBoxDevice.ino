@@ -21,8 +21,8 @@ String speed = "e";
 #define WIFI_PASSWORD "12345678"
 
 // Firebase Config 
-#define FIREBASE_HOST "--------------"       
-#define FIREBASE_AUTH "--------------"                    
+#define FIREBASE_HOST "------------"       
+#define FIREBASE_AUTH "------------"                    
 
 FirebaseData firebaseData;
 FirebaseConfig config;
@@ -51,6 +51,7 @@ const unsigned long sendInterval = 1000; // 1 second
 String getISOTime() {
   time_t rawTime = timeClient.getEpochTime();
   struct tm* timeInfo = gmtime(&rawTime);
+
   char buffer[25];
   sprintf(buffer, "%04d-%02d-%02dT%02d:%02d:%02dZ", 
           timeInfo->tm_year + 1900,
@@ -87,6 +88,17 @@ void setup() {
   Firebase.begin(&config, &auth);
   Firebase.reconnectWiFi(true);
 
+  // Log startup
+  String dateTime = getISOTime();
+  if (Firebase.setString(firebaseData, "/event/" + dateTime, "Device started")) {
+    Serial.println("Firebase message sent!");
+  } else {
+    Serial.print("Firebase error: ");
+    Serial.println(firebaseData.errorReason());
+  }
+
+  sendDataToFirebase();
+
   // MPU6050
   byte status = mpu.begin();
   Serial.print(F("MPU6050 status: "));
@@ -107,9 +119,26 @@ void setup() {
 void loop() {
   mpu.update();
 
-  // Sensor data update every 10 ms
   if ((millis() - sensorTimer) > 10) {
-    fireStatus = (digitalRead(FIRE_SENSOR_PIN) == LOW) ? 1 : 0;
+    float angleX = mpu.getAngleX();
+    float angleY = mpu.getAngleY();
+    float angleZ = mpu.getAngleZ();
+
+    float accX = mpu.getAccX();
+    float accY = mpu.getAccY();
+    float accZ = mpu.getAccZ();
+
+    Serial.print("Angle X: "); Serial.print(angleX);
+    Serial.print("\tY: "); Serial.print(angleY);
+    Serial.print("\tZ: "); Serial.println(angleZ);
+
+    Serial.print("Accel X: "); Serial.print(accX);
+    Serial.print("\tY: "); Serial.print(accY);
+    Serial.print("\tZ: "); Serial.println(accZ);
+
+    // Fire detection
+    fireStatus = (digitalRead(FIRE_SENSOR_PIN)==LOW) ?1:0;
+    
     sensorTimer = millis();
   }
 
@@ -119,14 +148,23 @@ void loop() {
     gps.encode(c);
 
     if (gps.location.isUpdated()) {
+      Serial.print("Latitude: ");
       lat = String(gps.location.lat(), 6);
+
+      Serial.print(" Longitude: ");
       lng = String(gps.location.lng(), 6);
+
+      Serial.print("Speed: ");
       speed = String(gps.speed.kmph());
+      Serial.println(" km/h");
+
+    } else if (!gps.location.isValid()) {
+      Serial.println("GPS location not valid yet...");
     }
   }
 
   timeClient.update();
-
+  
   // Send data every 1 second
   if (millis() - lastSendTime >= sendInterval) {
     sendDataToFirebase();
@@ -140,6 +178,14 @@ void sendDataToFirebase() {
   json.set("deviceId", deviceId);
   json.set("fireStatus", fireStatus);
 
+  delay(10000);
+}
+
+void sendDataToFirebase(){
+  
+  json.set("deviceId",deviceId);
+  json.set("fireStatus",fireStatus);
+  
   // gforces (acceleration)
   FirebaseJson gforces;
   gforces.set("X", String(mpu.getAccX()));

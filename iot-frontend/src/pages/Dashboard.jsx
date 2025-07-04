@@ -25,7 +25,7 @@ const Dashboard = () => {
 
     const menuItems = [
         { text: 'Overview', icon: <DashboardIcon />, path: '/dashboard/overview' },
-        { text: 'Accidents', icon: <WarningIcon />, path: '/dashboard/accidents' },
+        { text: 'Alerts History', icon: <WarningIcon />, path: '/dashboard/accidents' },
         { text: 'Speed Violations', icon: <SpeedIcon />, path: '/dashboard/speed' },
     ];
 
@@ -34,15 +34,12 @@ const Dashboard = () => {
             <Toolbar />
             <List>
                 {menuItems.map((item) => (
-                    <ListItem
-                        button
-                        key={item.text}
-                        onClick={() => navigate(item.path)}
-                    >
+                    <ListItem key={item.text} onClick={() => navigate(item.path)}>
                         <ListItemIcon>{item.icon}</ListItemIcon>
                         <ListItemText primary={item.text} />
                     </ListItem>
                 ))}
+
                 <ListItem button onClick={handleLogout}>
                     <ListItemIcon><LogoutIcon /></ListItemIcon>
                     <ListItemText primary="Logout" />
