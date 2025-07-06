@@ -166,6 +166,7 @@ const Accidents = () => {
                         filteredIncidents.map((incident) => (
                             <TableRow key={incident.id} hover>
                                 <TableCell>{incident.deviceId || 'N/A'}</TableCell>
+                                // Replace the timestamp display code with:
                                 <TableCell>
                                     {incident.timestamp ?
                                         new Date(incident.timestamp).toLocaleDateString('en-US', {
@@ -180,7 +181,8 @@ const Accidents = () => {
                                         new Date(incident.timestamp).toLocaleTimeString('en-US', {
                                             hour: '2-digit',
                                             minute: '2-digit',
-                                            second: '2-digit'
+                                            second: '2-digit',
+                                            timeZone: 'UTC' // Add this to show the exact time from Firebase
                                         }) :
                                         'No Time'}
                                 </TableCell>
