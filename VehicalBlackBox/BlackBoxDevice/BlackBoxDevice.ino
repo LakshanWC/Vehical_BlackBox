@@ -20,9 +20,9 @@ String speed = "waiting-gps";
 #define WIFI_SSID "POCO M3"
 #define WIFI_PASSWORD "12345678"
 
-#define FIREBASE_HOST "------------"       
-#define FIREBASE_AUTH "------------"                    
 // Firebase Config
+#define FIREBASE_HOST "https://vehicalblackbox-default-rtdb.asia-southeast1.firebasedatabase.app"
+#define FIREBASE_AUTH "i5qJdKqPWzd3UDYalSzK66BRDQzmOiZwK3kPleXu"
 
 FirebaseData firebaseData;
 FirebaseConfig config;
@@ -135,7 +135,7 @@ void loop() {
     Serial.print("\tY: "); Serial.print(accY);
     Serial.print("\tZ: "); Serial.println(accZ);
 
-    fireStatus = (digitalRead(FIRE_SENSOR_PIN) == LOW) ? 1 : 0;
+    fireStatus = (digitalRead(FIRE_SENSOR_PIN) == LOW) ? 0 : 1;
 
     sensorTimer = millis();
   }
