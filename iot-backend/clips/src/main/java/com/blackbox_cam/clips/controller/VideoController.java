@@ -16,10 +16,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 @RestController
+@CrossOrigin(origins = "*")
 @RequestMapping("/cam-api")
 public class VideoController {
 
     private final VideoService videoService;
+    private final Path videoStoragePath = Paths.get("D:\\New folder (3)\\Vehical_BlackBox\\iot-backend\\clips\\videos");
 
     public VideoController(VideoService videoService) {
         this.videoService = videoService;
@@ -38,7 +40,13 @@ public class VideoController {
 
     @GetMapping("/video/{filename}")
     public ResponseEntity<Resource> getVideo(@PathVariable String filename) throws IOException {
-        Path file = Paths.get("videos").resolve(filename);
+        Path file = videoStoragePath.resolve(filename).normalize();
+
+        // Security check to prevent path traversal
+        if (!file.startsWith(videoStoragePath)) {
+            return ResponseEntity.badRequest().build();
+        }
+
         if (!Files.exists(file)) {
             return ResponseEntity.notFound().build();
         }
@@ -47,6 +55,9 @@ public class VideoController {
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType("video/mp4"))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + filename + "\"")
+                .header(HttpHeaders.CACHE_CONTROL, "no-cache, no-store, must-revalidate")
+                .header(HttpHeaders.PRAGMA, "no-cache")
+                .header(HttpHeaders.EXPIRES, "0")
                 .body(resource);
     }
 }

@@ -77,7 +77,7 @@ public class VideoService {
 
     private void generateVideoFromImages() throws IOException, InterruptedException {
         ProcessBuilder pb = new ProcessBuilder(
-                "D:\\HNDSE_242\\IOT\\ffmpeg-2025-07-01-git-11d1b71c31-full_build\\bin\\ffmpeg.exe",
+                "D:\\IOT\\New folder\\ffmpeg-2025-07-01-git-11d1b71c31-full_build\\bin\\ffmpeg.exe",
                 "-framerate", "1",
                 "-i", "frame_%03d.jpg",
                 "-c:v", "libx264",

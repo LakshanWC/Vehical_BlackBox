@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import {
-    Box, Paper, Typography, Collapse, Divider, Avatar, Chip, Grid
+    Box, Paper, Typography, Collapse, Divider, Avatar, Chip, Grid, Button
 } from '@mui/material';
 import {
     Warning as WarningIcon,
@@ -9,12 +9,65 @@ import {
     Report as CrashIcon,
     Sync as RolloverIcon,
     Directions as DirectionIcon,
-    LocalFireDepartment as FireIcon
+    LocalFireDepartment as FireIcon,
+    Videocam as VideoIcon
 } from '@mui/icons-material';
 import MapView from './MapView';
 
 const AlertItem = ({ alert }) => {
     const [expanded, setExpanded] = useState(false);
+    const [videoUrl, setVideoUrl] = useState(null);
+    const [loadingVideo, setLoadingVideo] = useState(false);
+    const [videoError, setVideoError] = useState(null);
+
+    const fetchVideoClip = async () => {
+        setLoadingVideo(true);
+        setVideoError(null);
+        setVideoUrl(null);
+
+        try {
+            // Step 1: Generate the video
+            const generateResponse = await fetch('http://localhost:8099/cam-api/generate', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    deviceId: alert.deviceId,
+                    timestamp: alert.timestamp,
+                    location: alert.location
+                })
+            });
+
+            if (!generateResponse.ok) {
+                throw new Error(`Video generation failed with status ${generateResponse.status}`);
+            }
+
+            const result = await generateResponse.text();
+            const match = result.match(/Video saved as: (.+\.mp4)/);
+            if (!match) {
+                throw new Error('Could not parse video filename from response');
+            }
+
+            const filename = match[1].trim();
+
+            // Step 2: Construct the video stream URL
+            const videoStreamUrl = `http://localhost:8099/cam-api/video/${filename}`;
+
+            // Verify the video exists before setting the URL
+            const videoCheck = await fetch(videoStreamUrl);
+            if (!videoCheck.ok) {
+                throw new Error('Generated video not found on server');
+            }
+
+            setVideoUrl(videoStreamUrl);
+        } catch (error) {
+            console.error('Video error:', error);
+            setVideoError(error.message || 'Failed to load video');
+        } finally {
+            setLoadingVideo(false);
+        }
+    };
 
     const formatUTCTimestamp = (isoString) => {
         if (!isoString) return { date: 'N/A', time: 'N/A' };
@@ -27,12 +80,14 @@ const AlertItem = ({ alert }) => {
                 date: date.toLocaleDateString('en-US', {
                     year: 'numeric',
                     month: 'short',
-                    day: 'numeric'
+                    day: 'numeric',
+                    timeZone: 'UTC' // Show UTC date as stored in Firebase
                 }),
                 time: date.toLocaleTimeString('en-US', {
                     hour: '2-digit',
                     minute: '2-digit',
-                    second: '2-digit'
+                    second: '2-digit',
+                    timeZone: 'UTC' // Show UTC time as stored in Firebase
                 })
             };
         } catch {
@@ -40,7 +95,6 @@ const AlertItem = ({ alert }) => {
         }
     };
 
-    // Enhanced impact analysis - only for accidents/bumps
     const analyzeImpact = () => {
         if (!alert.gforces) return { direction: 'Unknown', type: 'Unknown' };
 
@@ -49,7 +103,6 @@ const AlertItem = ({ alert }) => {
             const yG = parseFloat(alert.gforces.Y);
             const zG = parseFloat(alert.gforces.Z);
 
-            // Determine primary impact direction
             let direction;
             const maxForce = Math.max(Math.abs(xG), Math.abs(yG), Math.abs(zG));
 
@@ -61,7 +114,6 @@ const AlertItem = ({ alert }) => {
                 direction = zG > 0 ? 'Underneath' : 'Top';
             }
 
-            // Determine impact type
             let type = 'Collision';
             if (zG < 0.3 || zG > 2.0) {
                 if (Math.abs(xG) > 2.5 || Math.abs(yG) > 3.0) {
@@ -77,7 +129,6 @@ const AlertItem = ({ alert }) => {
         }
     };
 
-    // Enhanced vehicle status detection - only for accidents/bumps
     const getVehicleStatus = () => {
         if (!alert.gyro) return 'Normal';
 
@@ -98,13 +149,57 @@ const AlertItem = ({ alert }) => {
         }
     };
 
-
     const { direction, type } = analyzeImpact();
     const vehicleStatus = getVehicleStatus();
     const formattedTime = formatUTCTimestamp(alert.timestamp);
     const isSpeedingAlert = alert.classification === 'SPEEDING';
     const isFireAlert = alert.classification === 'FIRE';
     const isSimpleAlert = isSpeedingAlert || isFireAlert;
+
+    const renderVideoSection = () => (
+        <Box sx={{ mt: 2, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <Button
+                variant="contained"
+                startIcon={<VideoIcon />}
+                onClick={fetchVideoClip}
+                disabled={loadingVideo}
+                sx={{ mb: 2 }}
+            >
+                {loadingVideo ? 'Generating...' : 'View Incident Video'}
+            </Button>
+
+            {videoError && (
+                <Typography color="error" sx={{ mb: 2 }}>
+                    {videoError}
+                </Typography>
+            )}
+
+            {videoUrl && (
+                <Box sx={{ width: '100%', maxWidth: '600px' }}>
+                    <video
+                        controls
+                        autoPlay
+                        muted
+                        style={{
+                            width: '100%',
+                            borderRadius: '4px',
+                            border: '1px solid #ddd',
+                            backgroundColor: '#000'
+                        }}
+                        key={videoUrl} // Force re-render when URL changes
+                    >
+                        <source src={videoUrl} type="video/mp4" />
+                        Your browser does not support the video tag.
+                    </video>
+                    <Typography variant="caption" display="block" textAlign="center" mt={1}>
+                        <a href={videoUrl} target="_blank" rel="noopener noreferrer">
+                            Open video in new tab
+                        </a>
+                    </Typography>
+                </Box>
+            )}
+        </Box>
+    );
 
     const renderSimpleAlert = () => (
         <Grid container spacing={3}>
@@ -154,6 +249,7 @@ const AlertItem = ({ alert }) => {
                                     zoom={15}
                                 />
                             </Box>
+                            {renderVideoSection()}
                         </Box>
                     )}
                 </Paper>
@@ -204,7 +300,6 @@ const AlertItem = ({ alert }) => {
                         renderSimpleAlert()
                     ) : (
                         <>
-                            {/* Impact Analysis Section */}
                             <Grid container spacing={3} sx={{ mb: 3 }}>
                                 <Grid item xs={6}>
                                     <Paper sx={{ p: 2, height: '100%' }}>
@@ -273,7 +368,6 @@ const AlertItem = ({ alert }) => {
                                 </Grid>
                             </Grid>
 
-                            {/* Force Details */}
                             <Paper sx={{ p: 2, mb: 3 }}>
                                 <Typography variant="h6" gutterBottom>
                                     Force Measurements
@@ -306,7 +400,6 @@ const AlertItem = ({ alert }) => {
                                 </Grid>
                             </Paper>
 
-                            {/* Location Map */}
                             {alert.location?.lat && (
                                 <Box>
                                     <Typography variant="h6" gutterBottom>
@@ -324,6 +417,7 @@ const AlertItem = ({ alert }) => {
                                             zoom={15}
                                         />
                                     </Box>
+                                    {renderVideoSection()}
                                 </Box>
                             )}
                         </>
