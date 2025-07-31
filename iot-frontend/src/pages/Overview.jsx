@@ -19,7 +19,7 @@ const Overview = () => {
                 const alertDate = new Date(childSnapshot.key);
                 const hoursDiff = (now - alertDate) / (1000 * 60 * 60);
 
-                if (hoursDiff <= 144) {
+                if (hoursDiff <= 48) {
                     const classification = classifyAlert(alertData);
                     const isSpeedViolation = checkSpeedViolation(alertData);
                     const isFireAlert = checkFireAlert(alertData);

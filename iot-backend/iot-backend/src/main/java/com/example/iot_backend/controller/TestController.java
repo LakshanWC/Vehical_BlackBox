@@ -17,7 +17,7 @@ public class TestController {
     public String sendTestEmail() {
         try {
             emailService.sendEmergencyAlert(
-                    "lakshanwc@gmail.com",  // Replace with your email
+                    "thisismysampleacc01@gmail.com",  // Replace with your email
                     "TEST: Accident Detection System",
                     "This is a test email from your backend."
             );

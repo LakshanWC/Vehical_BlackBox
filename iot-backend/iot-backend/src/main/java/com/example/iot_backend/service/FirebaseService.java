@@ -155,6 +155,7 @@ public class FirebaseService {
 
     private void triggerEmergencyProtocol(DeviceReading reading, String alertType) {
         try {
+            //prepare recipients list
             List<String> recipients = new ArrayList<>();
 
             // Add owner email if exists
