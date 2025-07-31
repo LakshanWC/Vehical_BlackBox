@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard';
 import Overview from './pages/Overview';
 import Accidents from './pages/Accidents';
 import SpeedViolations from './pages/SpeedViolations';
+import TripsTimeline  from "./components/TripsTimeline";
 
 const PrivateRoute = ({ children }) => {
     const isAuthenticated = localStorage.getItem('isAuthenticated');
@@ -25,6 +26,7 @@ const App = () => {
                 >
                     <Route index element={<Overview />} />
                     <Route path="overview" element={<Overview />} />
+                    <Route path="trips" element={<TripsTimeline />} />
                     <Route path="accidents" element={<Accidents />} />
                     <Route path="speed" element={<SpeedViolations />} />
                 </Route>

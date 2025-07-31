@@ -1,12 +1,26 @@
-// src/pages/Dashboard.jsx
 import React from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
-import { Box, CssBaseline, AppBar, Toolbar, Typography, IconButton, Drawer, List, ListItem, ListItemIcon, ListItemText } from '@mui/material';
+import {
+    Box,
+    CssBaseline,
+    AppBar,
+    Toolbar,
+    Typography,
+    IconButton,
+    Drawer,
+    List,
+    ListItem,
+    ListItemIcon,
+    ListItemText
+} from '@mui/material';
 import MenuIcon from '@mui/icons-material/Menu';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import SpeedIcon from '@mui/icons-material/Speed';
 import WarningIcon from '@mui/icons-material/Warning';
 import LogoutIcon from '@mui/icons-material/Logout';
+import TripsTimeline from '../components/TripsTimeline';
+import RouteIcon from '@mui/icons-material/Route';
+
 
 const drawerWidth = 240;
 
@@ -25,6 +39,7 @@ const Dashboard = () => {
 
     const menuItems = [
         { text: 'Overview', icon: <DashboardIcon />, path: '/dashboard/overview' },
+        { text: 'Car Routes', icon: <RouteIcon />, path: '/dashboard/trips' },
         { text: 'Alerts History', icon: <WarningIcon />, path: '/dashboard/accidents' },
         { text: 'Speed Violations', icon: <SpeedIcon />, path: '/dashboard/speed' },
     ];
@@ -40,8 +55,8 @@ const Dashboard = () => {
                     </ListItem>
                 ))}
 
-                <ListItem button onClick={handleLogout}>
-                    <ListItemIcon><LogoutIcon /></ListItemIcon>
+                <ListItem onClick={handleLogout}>
+                <ListItemIcon><LogoutIcon /></ListItemIcon>
                     <ListItemText primary="Logout" />
                 </ListItem>
             </List>

@@ -1,0 +1,4 @@
+.start-marker, .end-marker {
+    background: transparent !important;
+    border: none !important;
+}
