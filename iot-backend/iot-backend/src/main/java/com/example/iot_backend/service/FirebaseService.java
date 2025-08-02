@@ -9,19 +9,18 @@ import org.springframework.stereotype.Service;
 
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 
 @Service
 public class FirebaseService {
-
     private final FirebaseDatabase database;
     private final EmailService emailService;
     private DatabaseReference eventsRef;
     private DatabaseReference rootRef;
     private final Executor executor = Executors.newFixedThreadPool(4);
     private static final Logger logger = LoggerFactory.getLogger(FirebaseService.class);
+    private final Map<String, List<Map<String, String>>> deviceTrajectories = new HashMap<>();
 
     @Autowired
     public FirebaseService(EmailService emailService) {
@@ -116,9 +115,54 @@ public class FirebaseService {
     }
 
     private void analyzeAndAlert(DeviceReading reading, DataSnapshot snapshot) {
+        // Handle speed trajectory calculation first
+        if (reading.getSpeed() != null && !reading.getSpeed().equals("waiting-gps")) {
+            try {
+                double speed = Double.parseDouble(reading.getSpeed().replace(" km/h", ""));
+                if (speed > 60) {
+                    updateSpeedTrajectory(reading, snapshot);
+                }
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid speed format: {}", reading.getSpeed());
+            }
+        }
+
         String status = analyzeReading(reading);
         snapshot.getRef().child("status").setValueAsync(status);
     }
+
+    private void updateSpeedTrajectory(DeviceReading reading, DataSnapshot snapshot) {
+        String deviceId = reading.getDeviceId();
+        Map<String, String> currentLocation = reading.getLocation();
+
+        if (currentLocation == null ||
+                currentLocation.get("lat").equals("waiting-gps") ||
+                currentLocation.get("lng").equals("waiting-gps")) {
+            return;
+        }
+
+        // Initialize trajectory for device if not exists
+        deviceTrajectories.putIfAbsent(deviceId, new ArrayList<>());
+
+        // Add current location to trajectory
+        deviceTrajectories.get(deviceId).add(currentLocation);
+
+        // Keep only the last 10 locations for trajectory calculation
+        if (deviceTrajectories.get(deviceId).size() > 10) {
+            deviceTrajectories.get(deviceId).remove(0);
+        }
+
+        // Only create trajectory if we have at least 2 points
+        if (deviceTrajectories.get(deviceId).size() >= 2) {
+            Map<String, Object> trajectory = new HashMap<>();
+            trajectory.put("start", deviceTrajectories.get(deviceId).get(0));
+            trajectory.put("end", currentLocation);
+            trajectory.put("path", new ArrayList<>(deviceTrajectories.get(deviceId)));
+
+            snapshot.getRef().child("speedTrajectory").setValueAsync(trajectory);
+        }
+    }
+
 
     private String analyzeReading(DeviceReading reading) {
         try {

@@ -1,14 +1,14 @@
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
+import { Typography } from '@mui/material';
 
-const MapView = ({ center, markers, zoom = 13 }) => {
-    // Validate center coordinates
+const MapView = ({ center, markers = [], zoom = 13, children, polyline }) => {
     const lat = parseFloat(center[0]);
     const lng = parseFloat(center[1]);
 
-    if (isNaN(lat) || isNaN(lng)) {
-        return <div>Invalid location data</div>;
+    if (isNaN(lat) || isNaN(lng) || center[0] === "waiting-gps") {
+        return <Typography color="error">Invalid GPS Data</Typography>;
     }
 
     const validatedCenter = [lat, lng];
@@ -23,9 +23,9 @@ const MapView = ({ center, markers, zoom = 13 }) => {
                 url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             />
+            {children}
 
             {markers.map((marker, index) => {
-                // Validate marker positions
                 const markerLat = parseFloat(marker.position[0]);
                 const markerLng = parseFloat(marker.position[1]);
 
@@ -56,6 +56,15 @@ const MapView = ({ center, markers, zoom = 13 }) => {
                     </Marker>
                 );
             })}
+
+            {polyline && (
+                <Polyline
+                    positions={polyline}
+                    color="blue"
+                    weight={3}
+                    opacity={0.7}
+                />
+            )}
         </MapContainer>
     );
 };
