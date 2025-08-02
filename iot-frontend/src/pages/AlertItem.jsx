@@ -13,6 +13,8 @@ import {
     Videocam as VideoIcon
 } from '@mui/icons-material';
 import MapView from './MapView';
+import { Marker, Popup } from 'react-leaflet';
+import { divIcon } from 'leaflet';
 
 const AlertItem = ({ alert }) => {
     const [expanded, setExpanded] = useState(false);
@@ -26,7 +28,6 @@ const AlertItem = ({ alert }) => {
         setVideoUrl(null);
 
         try {
-            // Step 1: Generate the video
             const generateResponse = await fetch('http://localhost:8099/cam-api/generate', {
                 method: 'POST',
                 headers: {
@@ -50,11 +51,8 @@ const AlertItem = ({ alert }) => {
             }
 
             const filename = match[1].trim();
-
-            // Step 2: Construct the video stream URL
             const videoStreamUrl = `http://localhost:8099/cam-api/video/${filename}`;
 
-            // Verify the video exists before setting the URL
             const videoCheck = await fetch(videoStreamUrl);
             if (!videoCheck.ok) {
                 throw new Error('Generated video not found on server');
@@ -81,13 +79,13 @@ const AlertItem = ({ alert }) => {
                     year: 'numeric',
                     month: 'short',
                     day: 'numeric',
-                    timeZone: 'UTC' // Show UTC date as stored in Firebase
+                    timeZone: 'UTC'
                 }),
                 time: date.toLocaleTimeString('en-US', {
                     hour: '2-digit',
                     minute: '2-digit',
                     second: '2-digit',
-                    timeZone: 'UTC' // Show UTC time as stored in Firebase
+                    timeZone: 'UTC'
                 })
             };
         } catch {
@@ -149,6 +147,43 @@ const AlertItem = ({ alert }) => {
         }
     };
 
+    const renderSpeedTrajectory = () => {
+        if (alert.classification !== 'SPEEDING' || !alert.speedTrajectory) return null;
+
+        const positions = alert.speedTrajectory.map(point => [
+            parseFloat(point.lat),
+            parseFloat(point.lng)
+        ]);
+
+        return (
+            <>
+                {positions.map((position, index) => (
+                    <Marker
+                        key={index}
+                        position={position}
+                        icon={divIcon({
+                            className: `speed-point-${index}`,
+                            html: `<div style="
+                                background: ${index === 0 ? 'green' : index === positions.length - 1 ? 'red' : 'orange'};
+                                width: ${index === 0 || index === positions.length - 1 ? '20px' : '8px'};
+                                height: ${index === 0 || index === positions.length - 1 ? '20px' : '8px'};
+                                border-radius: 50%;
+                                border: 2px solid white;
+                                transform: translate(-6px, -6px);
+                            "></div>`
+                        })}
+                    >
+                        <Popup>
+                            {index === 0 ? 'Start' : index === positions.length - 1 ? 'End' : 'Point ' + (index + 1)}
+                            <br/>
+                            Speed: {alert.speed} km/h
+                        </Popup>
+                    </Marker>
+                ))}
+            </>
+        );
+    };
+
     const { direction, type } = analyzeImpact();
     const vehicleStatus = getVehicleStatus();
     const formattedTime = formatUTCTimestamp(alert.timestamp);
@@ -186,7 +221,7 @@ const AlertItem = ({ alert }) => {
                             border: '1px solid #ddd',
                             backgroundColor: '#000'
                         }}
-                        key={videoUrl} // Force re-render when URL changes
+                        key={videoUrl}
                     >
                         <source src={videoUrl} type="video/mp4" />
                         Your browser does not support the video tag.
@@ -226,29 +261,40 @@ const AlertItem = ({ alert }) => {
                     <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                         <SpeedIcon color="info" sx={{ mr: 1 }} />
                         <Typography variant="body1">
-                            <strong>Speed:</strong> {alert.speed || '--'} km/h
+                            <strong>Speed:</strong> {alert.speed === "waiting-gps" ? "GPS Connecting" : `${alert.speed || '--'} km/h`}
                         </Typography>
                     </Box>
 
                     {alert.location && (
                         <Box sx={{ mt: 2 }}>
                             <Typography variant="h6" gutterBottom>
-                                Location: {alert.location.lat}, {alert.location.lng}
+                                Location: {alert.location.lat === "waiting-gps" ? "GPS Connecting" : `${alert.location.lat}, ${alert.location.lng}`}
                             </Typography>
-                            <Box sx={{ height: '300px', borderRadius: 1, overflow: 'hidden' }}>
-                                <MapView
-                                    center={[parseFloat(alert.location.lat), parseFloat(alert.location.lng)]}
-                                    markers={[{
-                                        position: [parseFloat(alert.location.lat), parseFloat(alert.location.lng)],
-                                        color: isFireAlert ? 'red' : 'blue',
-                                        size: 30,
-                                        popup: isFireAlert ?
-                                            `Fire alert - ${alert.speed || 'unknown speed'}` :
-                                            `Speeding violation - ${alert.speed}`
-                                    }]}
-                                    zoom={15}
-                                />
-                            </Box>
+
+                            {alert.location.lat !== "waiting-gps" ? (
+                                <Box sx={{ height: '300px', borderRadius: 1, overflow: 'hidden' }}>
+                                    <MapView
+                                        center={[parseFloat(alert.location.lat), parseFloat(alert.location.lng)]}
+                                        markers={[{
+                                            position: [parseFloat(alert.location.lat), parseFloat(alert.location.lng)],
+                                            color: isFireAlert ? 'red' : 'blue',
+                                            size: 30,
+                                            popup: isFireAlert ?
+                                                `Fire alert - ${alert.speed || 'unknown speed'}` :
+                                                `Speeding violation - ${alert.speed}`
+                                        }]}
+                                        zoom={15}
+                                    >
+                                        {isSpeedingAlert && renderSpeedTrajectory()}
+                                    </MapView>
+                                </Box>
+                            ) : (
+                                <Typography color="error" sx={{ py: 2 }}>
+                                    <SpeedIcon sx={{ verticalAlign: 'middle', mr: 1 }} />
+                                    Waiting for GPS signal...
+                                </Typography>
+                            )}
+
                             {renderVideoSection()}
                         </Box>
                     )}

@@ -11,12 +11,10 @@ import {
     Chip,
     Tabs,
     Tab,
-    Tooltip,
     Paper,
     Link
 } from '@mui/material';
 import {
-    Warning as WarningIcon,
     Error as ErrorIcon,
     Speed as SpeedIcon,
     LocationOn as LocationIcon,
@@ -24,28 +22,35 @@ import {
     LocalFireDepartment as FireIcon
 } from '@mui/icons-material';
 import { database } from '../Firebase';
-import { ref, query, orderByChild, onValue } from 'firebase/database';
+import { ref, query, orderByChild, onValue, limitToLast } from 'firebase/database';
+import { formatFirebaseTimestamp } from "../utils/formatTime";
 
 const Accidents = () => {
     const [incidents, setIncidents] = useState([]);
     const [loading, setLoading] = useState(true);
     const [tabValue, setTabValue] = useState(0);
+
     useEffect(() => {
         const dbRef = ref(database, 'event');
-        const dbQuery = query(dbRef, orderByChild('timestamp'));
+        const dbQuery = query(dbRef, orderByChild('timestamp'), limitToLast(100));
 
         const unsubscribe = onValue(dbQuery, (snapshot) => {
             const data = [];
+            const now = new Date();
+
             snapshot.forEach((childSnapshot) => {
-                const incident = childSnapshot.val();
-                data.push({
-                    id: childSnapshot.key,
-                    ...incident,
-                    timestamp: childSnapshot.key,
-                    classification: classifyIncident(incident),
-                    vehicleStatus: getVehicleStatus(incident),
-                    impactDirection: getImpactDirection(incident)
-                });
+                const hoursDiff = (now - new Date(childSnapshot.key)) / (1000 * 60 * 60);
+                if (hoursDiff <= 48) {
+                    const incident = childSnapshot.val();
+                    data.push({
+                        id: childSnapshot.key,
+                        ...incident,
+                        timestamp: childSnapshot.key,
+                        classification: classifyIncident(incident),
+                        vehicleStatus: getVehicleStatus(incident),
+                        impactDirection: getImpactDirection(incident)
+                    });
+                }
             });
             setIncidents(data.reverse());
             setLoading(false);
@@ -55,10 +60,15 @@ const Accidents = () => {
     }, []);
 
     const classifyIncident = (incident) => {
-        if (incident.fire === 1) return 'FIRE';
+        if (incident.speed === "waiting-gps" || incident.location?.lat === "waiting-gps") {
+            return 'GPS_DISCONNECTED';
+        }
+
+        if (incident.fireStatus === 1) return 'FIRE';
 
         if (incident.speed) {
-            const speedValue = parseInt(incident.speed.replace(' km/h', '')) || 0;
+            const speedStr = incident.speed.replace(' km/h', '').trim();
+            const speedValue = parseFloat(speedStr) || 0;
             if (speedValue > 60) return 'SPEEDING';
         }
 
@@ -113,12 +123,14 @@ const Accidents = () => {
         }
     };
 
+    // Define filteredIncidents before using it in the render
     const filteredIncidents = incidents.filter(incident => {
+        const validTypes = ['ACCIDENT', 'BUMP', 'SPEEDING', 'FIRE'];
         if (tabValue === 0) return incident.classification === 'ACCIDENT';
         if (tabValue === 1) return incident.classification === 'BUMP';
         if (tabValue === 2) return incident.classification === 'SPEEDING';
         if (tabValue === 3) return incident.classification === 'FIRE';
-        return false;
+        return validTypes.includes(incident.classification); // For "All" tab
     });
 
     if (loading) {
@@ -145,7 +157,6 @@ const Accidents = () => {
                     <Tab label="Bumps" icon={<ErrorIcon color="warning" />} />
                     <Tab label="Speeding" icon={<SpeedIcon color="secondary" />} />
                     <Tab label="Fire" icon={<FireIcon color="error" />} />
-
                 </Tabs>
             </Paper>
 
@@ -166,25 +177,11 @@ const Accidents = () => {
                         filteredIncidents.map((incident) => (
                             <TableRow key={incident.id} hover>
                                 <TableCell>{incident.deviceId || 'N/A'}</TableCell>
-                                // Replace the timestamp display code with:
                                 <TableCell>
-                                    {incident.timestamp ?
-                                        new Date(incident.timestamp).toLocaleDateString('en-US', {
-                                            year: 'numeric',
-                                            month: 'short',
-                                            day: 'numeric'
-                                        }) :
-                                        'No Date'}
+                                    {formatFirebaseTimestamp(incident.timestamp).date}
                                 </TableCell>
                                 <TableCell>
-                                    {incident.timestamp ?
-                                        new Date(incident.timestamp).toLocaleTimeString('en-US', {
-                                            hour: '2-digit',
-                                            minute: '2-digit',
-                                            second: '2-digit',
-                                            timeZone: 'UTC' // Add this to show the exact time from Firebase
-                                        }) :
-                                        'No Time'}
+                                    {formatFirebaseTimestamp(incident.timestamp).time}
                                 </TableCell>
                                 <TableCell>
                                     {incident.location && (
@@ -208,7 +205,9 @@ const Accidents = () => {
                                         </Link>
                                     )}
                                 </TableCell>
-                                <TableCell>{incident.speed || 'N/A'} km/h</TableCell>
+                                <TableCell>
+                                    {incident.speed === "waiting-gps" ? "GPS Connecting" : `${incident.speed} km/h`}
+                                </TableCell>
                                 {(tabValue === 0 || tabValue === 1) && (
                                     <TableCell>
                                         <Chip
