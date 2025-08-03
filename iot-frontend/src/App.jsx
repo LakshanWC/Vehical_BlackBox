@@ -3,6 +3,8 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Overview from './pages/Overview';
 import Accidents from './pages/Accidents';
+import RideHistory from './pages/RideHistory';
+import LiveTracking from './pages/LiveTracking';
 
 const PrivateRoute = ({ children }) => {
     const isAuthenticated = localStorage.getItem('isAuthenticated');
@@ -25,6 +27,9 @@ const App = () => {
                     <Route index element={<Overview />} />
                     <Route path="overview" element={<Overview />} />
                     <Route path="accidents" element={<Accidents />} />
+                    <Route path="ride-history" element={<RideHistory />} />
+                    <Route path="live-tracking" element={<LiveTracking />} />
+
                 </Route>
                 <Route path="*" element={<Navigate to="/login" replace />} />
             </Routes>
