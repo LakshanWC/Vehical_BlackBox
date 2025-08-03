@@ -4,6 +4,8 @@ import { Box, CssBaseline, AppBar, Toolbar, Typography, IconButton, Drawer, List
 import MenuIcon from '@mui/icons-material/Menu';
 import DashboardIcon from '@mui/icons-material/Dashboard';
 import WarningIcon from '@mui/icons-material/Warning';
+import HistoryIcon from '@mui/icons-material/History';
+import GpsFixedIcon from '@mui/icons-material/GpsFixed';
 import LogoutIcon from '@mui/icons-material/Logout';
 
 const drawerWidth = 240;
@@ -24,6 +26,8 @@ const Dashboard = () => {
     const menuItems = [
         { text: 'Overview', icon: <DashboardIcon />, path: '/dashboard/overview' },
         { text: 'Alerts History', icon: <WarningIcon />, path: '/dashboard/accidents' },
+        { text: 'Ride History', icon: <HistoryIcon />, path: '/dashboard/ride-history' },
+        { text: 'Live Tracking', icon: <GpsFixedIcon />, path: '/dashboard/live-tracking' }
     ];
 
     const drawer = (
@@ -31,13 +35,20 @@ const Dashboard = () => {
             <Toolbar />
             <List>
                 {menuItems.map((item) => (
-                    <ListItem key={item.text} onClick={() => navigate(item.path)}>
+                    <ListItem
+                        key={item.text}
+                        onClick={() => navigate(item.path)}
+                        sx={{ cursor: 'pointer' }}
+                    >
                         <ListItemIcon>{item.icon}</ListItemIcon>
                         <ListItemText primary={item.text} />
                     </ListItem>
                 ))}
 
-                <ListItem button onClick={handleLogout}>
+                <ListItem
+                    onClick={handleLogout}
+                    sx={{ cursor: 'pointer' }}
+                >
                     <ListItemIcon><LogoutIcon /></ListItemIcon>
                     <ListItemText primary="Logout" />
                 </ListItem>
