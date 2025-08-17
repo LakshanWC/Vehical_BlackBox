@@ -1,103 +1,93 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Box, Typography, Paper, Alert, Snackbar, Chip, Stack } from '@mui/material';
-import LiveMap from '../components/LiveMap';
+// Enhanced LiveTracking.jsx
+import React, { useEffect, useState, useRef } from 'react';
+import { Box, Typography } from '@mui/material';
 import { database } from '../Firebase';
 import { ref, onValue } from 'firebase/database';
-import {
-    processLiveRide,
-    checkRideStatus,
-    shouldTriggerAlert,
-    calculateRideStats
-} from '../utils/liveTrackingUtils';
+import { MapContainer, TileLayer, Marker, Polyline } from 'react-leaflet';
+import { createVehicleIcon } from '../components/VehicleIcon';
 
-export default function LiveTracking() {
-    const [currentRide, setCurrentRide] = useState(null);
-    const [activeAlert, setActiveAlert] = useState(null);
-    const [stats, setStats] = useState(null);
+const LiveTracking = () => {
+    const [positions, setPositions] = useState([]);
+    const [currentPosition, setCurrentPosition] = useState(null);
+    const mapRef = useRef();
 
-    // Process real-time data
     useEffect(() => {
-        const dbRef = ref(database, 'event');
-        const unsubscribe = onValue(dbRef, (snapshot) => {
-            const data = snapshot.val();
-            if (!data) return;
+        const eventsRef = ref(database, 'event');
+        const unsubscribe = onValue(eventsRef, (snapshot) => {
+            const newPositions = [];
+            snapshot.forEach((childSnapshot) => {
+                const event = childSnapshot.val();
+                const { lat, lng } = event.location || {};
 
-            const latestEntry = Object.entries(data)
-                .map(([timestamp, entry]) => ({ timestamp, ...entry }))
-                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))[0];
-
-            setCurrentRide(prev => {
-                const updatedRide = processLiveRide(latestEntry, prev);
-                setStats(calculateRideStats(updatedRide));
-                return updatedRide;
+                if (lat && lng && isValidCoordinate(lat, lng)) {
+                    newPositions.push([parseFloat(lat), parseFloat(lng)]);
+                }
             });
 
-            const alertType = shouldTriggerAlert(latestEntry);
-            if (alertType) setActiveAlert({ type: alertType, position: latestEntry.location });
+            // Update state only with valid positions
+            setPositions(newPositions);
+            if (newPositions.length > 0) {
+                setCurrentPosition(newPositions[newPositions.length - 1]);
+            }
         });
 
-        const interval = setInterval(() => {
-            setCurrentRide(prev => {
-                const updatedRide = checkRideStatus(prev);
-                if (updatedRide?.isActive !== prev?.isActive) {
-                    setStats(calculateRideStats(updatedRide));
-                }
-                return updatedRide;
-            });
-        }, 1000);
-
-        return () => {
-            unsubscribe();
-            clearInterval(interval);
-        };
+        return () => unsubscribe();
     }, []);
 
-    // Auto-dismiss alerts
-    useEffect(() => {
-        if (activeAlert) {
-            const timer = setTimeout(() => setActiveAlert(null), 10000);
-            return () => clearTimeout(timer);
-        }
-    }, [activeAlert]);
-
     return (
-        <Box sx={{ p: 2, height: 'calc(100vh - 64px)', display: 'flex', flexDirection: 'column' }}>
-            <Paper sx={{ p: 2, mb: 2 }}>
-                <Typography variant="h6" gutterBottom>
-                    {currentRide?.isActive ? 'Live Tracking Active' : 'No Active Ride'}
-                </Typography>
-
-                {stats && (
-                    <Stack direction="row" spacing={2} sx={{ mt: 1 }}>
-                        <Chip label={`Duration: ${stats.duration}`} />
-                        <Chip label={`Avg Speed: ${stats.avgSpeed.toFixed(1)} km/h`} />
-                        <Chip
-                            label={`Max Speed: ${stats.maxSpeed.toFixed(1)} km/h`}
-                            color={stats.maxSpeed > 60 ? 'error' : 'default'}
-                        />
-                        <Chip label={`Distance: ${stats.distance} km`} />
-                    </Stack>
-                )}
-            </Paper>
-
-            <Paper sx={{ flexGrow: 1, position: 'relative' }}>
-                <LiveMap
-                    path={currentRide?.path || []}
-                    currentPosition={currentRide?.end?.location}
-                    alert={activeAlert?.type}
-                    isRideComplete={!currentRide?.isActive}
+        <Box sx={{ height: '100vh', width: '100%' }}>
+            <MapContainer
+                center={currentPosition || [6.743987, 79.968389]}
+                zoom={15}
+                style={{ height: '100%', width: '100%' }}
+                ref={mapRef}
+            >
+                <TileLayer
+                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                 />
-            </Paper>
 
-            <Snackbar open={!!activeAlert} anchorOrigin={{ vertical: 'top', horizontal: 'center' }}>
-                <Alert severity={
-                    activeAlert?.type === 'FIRE' ? 'error' :
-                        activeAlert?.type === 'ACCIDENT' ? 'error' : 'warning'
-                }>
-                    {activeAlert?.type === 'FIRE' ? '🔥 FIRE DETECTED' :
-                        activeAlert?.type === 'ACCIDENT' ? '🚨 ACCIDENT DETECTED' : '🚔 SPEEDING WARNING'}
-                </Alert>
-            </Snackbar>
+                {/* Vehicle Path */}
+                {positions.length > 0 && (
+                    <Polyline
+                        positions={positions}
+                        color="blue"
+                        weight={3}
+                    />
+                )}
+
+                {/* Current Vehicle Position */}
+                {currentPosition && (
+                    <Marker
+                        position={[currentPosition.lat, currentPosition.lng]}
+                        icon={createVehicleIcon(currentPosition.heading)}
+                    />
+                )}
+
+                {/* Trip Start/End Markers */}
+                {trips.map((trip, tripIndex) => (
+                    <>
+                        <Marker
+                            key={`start-${tripIndex}`}
+                            position={[trip[0].lat, trip[0].lng]}
+                            icon={L.divIcon({
+                                className: 'trip-marker',
+                                html: `<div style="background:#4CAF50;width:12px;height:12px;border-radius:50%;border:2px solid white"></div>`
+                            })}
+                        />
+                        <Marker
+                            key={`end-${tripIndex}`}
+                            position={[trip[trip.length-1].lat, trip[trip.length-1].lng]}
+                            icon={L.divIcon({
+                                className: 'trip-marker',
+                                html: `<div style="background:#F44336;width:12px;height:12px;border-radius:50%;border:2px solid white"></div>`
+                            })}
+                        />
+                    </>
+                ))}
+            </MapContainer>
         </Box>
     );
-}
+};
+
+export default LiveTracking;
