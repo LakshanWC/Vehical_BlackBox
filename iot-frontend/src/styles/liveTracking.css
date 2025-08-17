@@ -1,0 +1,34 @@
+.live-map-container {
+    height: 100%;
+    width: 100%;
+    position: relative;
+}
+
+.no-gps {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 1rem;
+    background: rgba(255,255,255,0.9);
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+.pulse-marker {
+    animation: pulse 1s infinite;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+}
+
+.MuiAlert-root {
+    animation: pulse 1s infinite;
+}
+.vehicle-icon {
+    background: none !important;
+    border: none !important;
+}
