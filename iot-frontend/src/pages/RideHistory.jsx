@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     Box, Typography, Accordion, AccordionSummary, AccordionDetails,
-    CircularProgress, Chip, Divider
+    CircularProgress, Chip, Divider, List, ListItem, ListItemText
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import RideMap from '../components/RideMap';
@@ -13,6 +13,7 @@ import { processRideData, formatDisplayDate } from '../utils/rideUtils';
 export default function RideHistory() {
     const [ridesByDate, setRidesByDate] = useState(null);
     const [loading, setLoading] = useState(true);
+    const [expandedRide, setExpandedRide] = useState(null);
 
     useEffect(() => {
         const eventsRef = ref(database, 'event');
@@ -26,6 +27,10 @@ export default function RideHistory() {
         return () => unsubscribe();
     }, []);
 
+    const handleRideExpand = (dateIndex, rideIndex) => {
+        setExpandedRide(expandedRide === `${dateIndex}-${rideIndex}` ? null : `${dateIndex}-${rideIndex}`);
+    };
+
     if (loading) {
         return (
             <Box sx={{ display: 'flex', justifyContent: 'center', p: 4 }}>
@@ -34,7 +39,7 @@ export default function RideHistory() {
         );
     }
 
-    const dates = Object.keys(ridesByDate).sort().reverse();
+    const dates = Object.keys(ridesByDate || {}).sort().reverse();
 
     return (
         <Box sx={{ p: 3 }}>
@@ -45,10 +50,10 @@ export default function RideHistory() {
             {dates.length === 0 ? (
                 <Typography>No ride data available</Typography>
             ) : (
-                dates.map(date => (
+                dates.map((date, dateIndex) => (
                     <Accordion
                         key={date}
-                        defaultExpanded={date === dates[0]}
+                        defaultExpanded={dateIndex === 0}
                         sx={{ mb: 2 }}
                     >
                         <AccordionSummary expandIcon={<ExpandMoreIcon />}>
@@ -62,21 +67,38 @@ export default function RideHistory() {
                             />
                         </AccordionSummary>
                         <AccordionDetails>
-                            {ridesByDate[date].length > 0 ? (
-                                ridesByDate[date].map((ride, index) => (
-                                    <Box key={index} sx={{ mb: 4 }}>
-                                        <RideMap ride={ride} />
-                                        <RideStats ride={ride} />
-                                        {index < ridesByDate[date].length - 1 && (
-                                            <Divider sx={{ my: 3 }} />
+                            <List sx={{ width: '100%' }}>
+                                {ridesByDate[date].map((ride, rideIndex) => (
+                                    <React.Fragment key={rideIndex}>
+                                        <ListItem
+                                            button
+                                            onClick={() => handleRideExpand(dateIndex, rideIndex)}
+                                            sx={{
+                                                backgroundColor: expandedRide === `${dateIndex}-${rideIndex}`
+                                                    ? 'action.selected'
+                                                    : 'background.paper',
+                                                borderRadius: 1
+                                            }}
+                                        >
+                                            <ListItemText
+                                                primary={`Ride ${rideIndex + 1}`}
+                                                secondary={`Duration: ${ride.duration} • Avg Speed: ${ride.avgSpeed}`}
+                                            />
+                                        </ListItem>
+                                        {expandedRide === `${dateIndex}-${rideIndex}` && (
+                                            <Box sx={{ p: 2, pt: 0 }}>
+                                                <Box sx={{ height: '400px', mb: 2 }}>
+                                                    <RideMap ride={ride} />
+                                                </Box>
+                                                <RideStats ride={ride} />
+                                            </Box>
                                         )}
-                                    </Box>
-                                ))
-                            ) : (
-                                <Typography color="text.secondary">
-                                    No rides recorded on this day
-                                </Typography>
-                            )}
+                                        {rideIndex < ridesByDate[date].length - 1 && (
+                                            <Divider sx={{ my: 1 }} />
+                                        )}
+                                    </React.Fragment>
+                                ))}
+                            </List>
                         </AccordionDetails>
                     </Accordion>
                 ))
