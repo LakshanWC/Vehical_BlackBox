@@ -1,25 +1,7 @@
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
-import L from 'leaflet';
-import { Typography } from '@mui/material';
-import 'leaflet/dist/leaflet.css';
-
-// Sri Lanka bounds
-const SRI_LANKA_BOUNDS = L.latLngBounds(
-    L.latLng(5.5, 79), // SW
-    L.latLng(10, 82)    // NE
-);
-
-const createMarkerIcon = (color) => L.divIcon({
-    className: 'custom-marker',
-    html: `<div style="
-        background: ${color};
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        border: 3px solid white;
-        transform: translate(-12px, -12px);
-    "></div>`
-});
+// components/RideMap.jsx
+import React from 'react';
+import { Typography, Box } from '@mui/material';
+import GoogleMapWrapper from './GoogleMapWrapper';
 
 // Strict coordinate validation
 const isValidSriLankaCoordinate = (lat, lng) => {
@@ -36,7 +18,7 @@ const isValidSriLankaCoordinate = (lat, lng) => {
     }
 };
 
-export default function RideMap({ ride, bounds = SRI_LANKA_BOUNDS }) {
+export default function RideMap({ ride, mapType = 'roadmap' }) {
     const validPoints = ride.path.filter(p =>
         p.location.lat !== "waiting-gps" &&
         p.location.lng !== "waiting-gps" &&
@@ -47,53 +29,59 @@ export default function RideMap({ ride, bounds = SRI_LANKA_BOUNDS }) {
         return <Typography color="textSecondary">Insufficient valid location data for this ride</Typography>;
     }
 
-    const path = validPoints.map(p => [
-        parseFloat(p.location.lat),
-        parseFloat(p.location.lng)
-    ]);
+    const path = validPoints.map(p => ({
+        lat: parseFloat(p.location.lat),
+        lng: parseFloat(p.location.lng)
+    }));
+
+    const markers = [
+        {
+            position: path[0],
+            title: 'Start',
+            infoWindow: `
+        <div>
+          <strong>Start</strong><br />
+          ${new Date(ride.start.timestamp).toUTCString()}
+        </div>
+      `,
+            icon: {
+                url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" fill="#4CAF50" stroke="white" stroke-width="2"/>
+          </svg>
+        `),
+                scaledSize: new window.google.maps.Size(24, 24),
+                anchor: new window.google.maps.Point(12, 12)
+            }
+        },
+        {
+            position: path[path.length - 1],
+            title: 'End',
+            infoWindow: `
+        <div>
+          <strong>End</strong><br />
+          ${new Date(ride.end.timestamp).toUTCString()}
+        </div>
+      `,
+            icon: {
+                url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="10" fill="#F44336" stroke="white" stroke-width="2"/>
+          </svg>
+        `),
+                scaledSize: new window.google.maps.Size(24, 24),
+                anchor: new window.google.maps.Point(12, 12)
+            }
+        }
+    ];
 
     return (
-        <div style={{ height: '300px', width: '100%', borderRadius: '8px', overflow: 'hidden' }}>
-            <MapContainer
-                bounds={path.length > 0 ? L.latLngBounds(path) : bounds}
-                zoom={13}
-                style={{ height: '100%', width: '100%' }}
-                minZoom={10}
-                maxBounds={bounds}
-                maxBoundsViscosity={1.0}
-                whenReady={(map) => {
-                    map.target.setMaxBounds(bounds);
-                }}
-            >
-                <TileLayer
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                    noWrap={true}
-                />
-                <Marker
-                    position={path[0]}
-                    icon={createMarkerIcon('#4CAF50')}
-                >
-                    <Popup>
-                        <strong>Start</strong><br />
-                        {new Date(ride.start.timestamp).toUTCString()}
-                    </Popup>
-                </Marker>
-                <Marker
-                    position={path[path.length - 1]}
-                    icon={createMarkerIcon('#F44336')}
-                >
-                    <Popup>
-                        <strong>End</strong><br />
-                        {new Date(ride.end.timestamp).toUTCString()}
-                    </Popup>
-                </Marker>
-                <Polyline
-                    positions={path}
-                    color="#1976D2"
-                    weight={3}
-                />
-            </MapContainer>
-        </div>
+        <Box sx={{ height: '300px', width: '100%', borderRadius: '8px', overflow: 'hidden' }}>
+            <GoogleMapWrapper
+                path={path}
+                markers={markers}
+                mapTypeId={mapType}
+            />
+        </Box>
     );
 }
