@@ -2,8 +2,9 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import { Typography } from '@mui/material';
+import PropTypes from 'prop-types';
 
-const MapView = ({ center, markers = [], zoom = 13, children, polyline }) => {
+const MapView = ({ center, markers = [], zoom = 13, children, polyline, polylineColors }) => {
     const lat = parseFloat(center[0]);
     const lng = parseFloat(center[1]);
 
@@ -60,13 +61,17 @@ const MapView = ({ center, markers = [], zoom = 13, children, polyline }) => {
             {polyline && (
                 <Polyline
                     positions={polyline}
-                    color="blue"
+                    pathOptions={{ color: polylineColors || "blue" }}
                     weight={3}
                     opacity={0.7}
                 />
             )}
         </MapContainer>
     );
+};
+
+MapView.propTypes = {
+    polylineColors: PropTypes.string, // single color string
 };
 
 export default MapView;
