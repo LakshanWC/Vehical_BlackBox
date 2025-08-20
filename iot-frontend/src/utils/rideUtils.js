@@ -85,3 +85,27 @@ export const formatDisplayDate = (isoDate) => {
         day: 'numeric'
     });
 };
+
+// ✅ New function
+export const processRideHistoryData = (rawData) => {
+    const ridesByDate = {};
+    const currentTime = Date.now();
+
+    Object.entries(rawData).forEach(([deviceId, deviceRides]) => {
+        Object.entries(deviceRides).forEach(([startTime, rideData]) => {
+            // Only show rides from last 48 hours
+            if (currentTime - parseInt(startTime) <= 172800000) {
+                const date = new Date(parseInt(startTime)).toISOString().split('T')[0];
+                if (!ridesByDate[date]) ridesByDate[date] = [];
+
+                ridesByDate[date].push({
+                    deviceId,
+                    startTime: parseInt(startTime),
+                    ...rideData
+                });
+            }
+        });
+    });
+
+    return ridesByDate;
+};

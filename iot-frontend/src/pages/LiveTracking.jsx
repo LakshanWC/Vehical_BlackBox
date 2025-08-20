@@ -1,25 +1,30 @@
-// Updated LiveTracking.jsx with robust error handling
+// pages/LiveTracking.jsx
 import React, { useEffect, useState, useRef } from 'react';
-import { Box } from '@mui/material';
+import { Box, Typography } from '@mui/material';
 import { database } from '../Firebase';
 import { ref, onValue } from 'firebase/database';
-import { MapContainer, TileLayer, Marker, Polyline } from 'react-leaflet';
-import { createVehicleIcon } from '../components/VehicleIcon';
-import L from 'leaflet';
-import 'leaflet/dist/leaflet.css';
+import GoogleMapWrapper from '../components/GoogleMapWrapper';
 
-// Sri Lanka approximate bounds
-const SRI_LANKA_BOUNDS = L.latLngBounds(
-    L.latLng(5.5, 79), // SW
-    L.latLng(10, 82)   // NE
-);
+// Create vehicle icon with heading
+const createVehicleIcon = (heading) => {
+    return {
+        url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="#007bff" transform="rotate(${heading} 12 12)">
+        <path d="M18.92 6.01C18.72 5.42 18.16 5 17.5 5h-11c-.66 0-1.21.42-1.42 1.01L3 12v8c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-1h12v1c0 .55.45 1 1 1h1c.55 0 1-.45 1-1v-8l-2.08-5.99zM6.85 7h10.29l1.08 3.11H5.77L6.85 7zM19 17H5v-5h14v5z"/>
+      </svg>
+    `),
+        scaledSize: new window.google.maps.Size(24, 24),
+        anchor: new window.google.maps.Point(12, 12)
+    };
+};
 
 const LiveTracking = () => {
     const [positions, setPositions] = useState([]);
     const [currentPosition, setCurrentPosition] = useState(null);
     const [trips, setTrips] = useState([]);
     const [dataError, setDataError] = useState(null);
-    const mapRef = useRef();
+    const [mapType, setMapType] = useState('roadmap');
+    const mapRef = useRef(null);
 
     // Strict coordinate validation
     const isValidSriLankaCoordinate = (lat, lng) => {
@@ -69,7 +74,7 @@ const LiveTracking = () => {
                             }
 
                             currentTrip.push(point);
-                            newPositions.push([point.lat, point.lng]);
+                            newPositions.push({ lat: point.lat, lng: point.lng });
                             lastTimestamp = point.timestamp;
                             validPoints++;
                         }
@@ -95,12 +100,9 @@ const LiveTracking = () => {
                     setCurrentPosition(latestPos);
 
                     // Smoothly animate to new position
-                    if (mapRef.current) {
-                        mapRef.current.flyTo(
-                            [latestPos.lat, latestPos.lng],
-                            17,
-                            { duration: 1 }
-                        );
+                    if (mapRef.current && latestPos) {
+                        mapRef.current.panTo({ lat: latestPos.lat, lng: latestPos.lng });
+                        mapRef.current.setZoom(18);
                     }
                 }
             } catch (error) {
@@ -111,6 +113,56 @@ const LiveTracking = () => {
 
         return () => unsubscribe();
     }, []);
+
+    const handleMapLoad = (map) => {
+        mapRef.current = map;
+    };
+
+    const markers = [];
+
+    // Current Vehicle Position
+    if (currentPosition) {
+        markers.push({
+            position: { lat: currentPosition.lat, lng: currentPosition.lng },
+            title: 'Current Position',
+            icon: createVehicleIcon(currentPosition.heading)
+        });
+    }
+
+    // Trip Markers
+    trips.forEach((trip, tripIndex) => {
+        if (trip.length > 0) {
+            // Start marker
+            markers.push({
+                position: { lat: trip[0].lat, lng: trip[0].lng },
+                title: `Trip ${tripIndex + 1} Start`,
+                icon: {
+                    url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+              <circle cx="8" cy="8" r="6" fill="#4CAF50" stroke="white" stroke-width="2"/>
+            </svg>
+          `),
+                    scaledSize: new window.google.maps.Size(16, 16),
+                    anchor: new window.google.maps.Point(8, 8)
+                }
+            });
+
+            // End marker
+            markers.push({
+                position: { lat: trip[trip.length-1].lat, lng: trip[trip.length-1].lng },
+                title: `Trip ${tripIndex + 1} End`,
+                icon: {
+                    url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+              <circle cx="8" cy="8" r="6" fill="#F44336" stroke="white" stroke-width="2"/>
+            </svg>
+          `),
+                    scaledSize: new window.google.maps.Size(16, 16),
+                    anchor: new window.google.maps.Point(8, 8)
+                }
+            });
+        }
+    });
 
     return (
         <Box sx={{ height: '100vh', width: '100%', position: 'relative' }}>
@@ -129,64 +181,55 @@ const LiveTracking = () => {
                 </Box>
             )}
 
-            <MapContainer
-                center={[6.9271, 79.8612]} // Colombo coordinates
+            <Box sx={{
+                position: 'absolute',
+                top: 10,
+                right: 10,
+                zIndex: 1000,
+                backgroundColor: 'white',
+                padding: 1,
+                borderRadius: 1,
+                boxShadow: 3,
+                display: 'flex',
+                gap: 1
+            }}>
+                <button
+                    onClick={() => setMapType('roadmap')}
+                    style={{
+                        padding: '5px 10px',
+                        backgroundColor: mapType === 'roadmap' ? '#1976d2' : '#f5f5f5',
+                        color: mapType === 'roadmap' ? 'white' : 'black',
+                        border: '1px solid #ccc',
+                        borderRadius: '3px',
+                        cursor: 'pointer'
+                    }}
+                >
+                    Normal
+                </button>
+                <button
+                    onClick={() => setMapType('satellite')}
+                    style={{
+                        padding: '5px 10px',
+                        backgroundColor: mapType === 'satellite' ? '#1976d2' : '#f5f5f5',
+                        color: mapType === 'satellite' ? 'white' : 'black',
+                        border: '1px solid #ccc',
+                        borderRadius: '3px',
+                        cursor: 'pointer'
+                    }}
+                >
+                    Satellite
+                </button>
+            </Box>
+
+            <GoogleMapWrapper
+                center={currentPosition ? { lat: currentPosition.lat, lng: currentPosition.lng } : { lat: 6.9271, lng: 79.8612 }}
                 zoom={15}
-                style={{ height: '100%', width: '100%' }}
-                ref={mapRef}
-                minZoom={10}
-                maxBounds={SRI_LANKA_BOUNDS}
-                maxBoundsViscosity={1.0}
-                whenCreated={(map) => {
-                    mapRef.current = map;
-                    map.setMaxBounds(SRI_LANKA_BOUNDS);
-                }}
-            >
-                <TileLayer
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                    noWrap={true}
-                />
-
-                {/* Vehicle Path */}
-                <Polyline
-                    positions={positions}
-                    color="blue"
-                    weight={3}
-                />
-
-                {/* Current Vehicle Position */}
-                {currentPosition && (
-                    <Marker
-                        position={[currentPosition.lat, currentPosition.lng]}
-                        icon={createVehicleIcon(currentPosition.heading)}
-                    />
-                )}
-
-                {/* Trip Markers */}
-                {trips.map((trip, tripIndex) => (
-                    <React.Fragment key={`trip-${tripIndex}`}>
-                        {trip.length > 0 && (
-                            <>
-                                <Marker
-                                    position={[trip[0].lat, trip[0].lng]}
-                                    icon={L.divIcon({
-                                        className: 'trip-marker',
-                                        html: '<div style="background:#4CAF50;width:12px;height:12px;border-radius:50%;border:2px solid white"></div>'
-                                    })}
-                                />
-                                <Marker
-                                    position={[trip[trip.length-1].lat, trip[trip.length-1].lng]}
-                                    icon={L.divIcon({
-                                        className: 'trip-marker',
-                                        html: '<div style="background:#F44336;width:12px;height:12px;border-radius:50%;border:2px solid white"></div>'
-                                    })}
-                                />
-                            </>
-                        )}
-                    </React.Fragment>
-                ))}
-            </MapContainer>
+                path={positions}
+                markers={markers}
+                onMapLoad={handleMapLoad}
+                mapTypeId={mapType}
+                style={{ height: '600px', width: '100%' }}
+            />
         </Box>
     );
 };

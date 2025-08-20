@@ -76,7 +76,7 @@ export default function RideMap({ ride, mapType = 'roadmap' }) {
     ];
 
     return (
-        <Box sx={{ height: '300px', width: '100%', borderRadius: '8px', overflow: 'hidden' }}>
+        <Box sx={{ height: '600px', width: '100%', borderRadius: '8px', overflow: 'hidden' }}>
             <GoogleMapWrapper
                 path={path}
                 markers={markers}
