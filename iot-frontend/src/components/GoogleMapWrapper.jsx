@@ -11,9 +11,10 @@ const GoogleMapWrapper = ({
                           }) => {
     const mapRef = useRef(null);
     const [map, setMap] = useState(null);
-    const [polylines, setPolylines] = useState([]);
-    const [mapMarkers, setMapMarkers] = useState([]);
+    const polylinesRef = useRef([]);   // 👈 ref instead of state
+    const markersRef = useRef([]);     // 👈 ref instead of state
 
+    // Initialize map
     useEffect(() => {
         if (mapRef.current && !map) {
             const newMap = new window.google.maps.Map(mapRef.current, {
@@ -33,15 +34,16 @@ const GoogleMapWrapper = ({
             setMap(newMap);
             if (onMapLoad) onMapLoad(newMap);
         }
-    }, [center, zoom, mapTypeId, onMapLoad, map]);
+    }, [map, center, zoom, mapTypeId, onMapLoad]);
 
-    // Update map center and zoom
+    // Update map center
     useEffect(() => {
         if (map && center) {
             map.setCenter(center);
         }
     }, [map, center]);
 
+    // Update zoom
     useEffect(() => {
         if (map && zoom) {
             map.setZoom(zoom);
@@ -57,46 +59,40 @@ const GoogleMapWrapper = ({
 
     // Draw path
     useEffect(() => {
-        // Clear existing polylines
-        polylines.forEach(polyline => polyline.setMap(null));
+        // Clear old
+        polylinesRef.current.forEach(polyline => polyline.setMap(null));
+        polylinesRef.current = [];
 
         if (map && path.length > 1) {
             const newPolyline = new window.google.maps.Polyline({
-                path: path,
+                path,
                 geodesic: true,
                 strokeColor: '#1976D2',
                 strokeOpacity: 1.0,
                 strokeWeight: 3,
-                map: map
+                map
             });
 
-            setPolylines([newPolyline]);
+            polylinesRef.current.push(newPolyline);
 
-            // Adjust bounds to show entire path
-            if (path.length > 0) {
-                const bounds = new window.google.maps.LatLngBounds();
-                path.forEach(point => bounds.extend(point));
-                map.fitBounds(bounds);
-            }
-        } else {
-            setPolylines([]);
+            // Fit bounds
+            const bounds = new window.google.maps.LatLngBounds();
+            path.forEach(point => bounds.extend(point));
+            map.fitBounds(bounds);
         }
-
-        return () => {
-            polylines.forEach(polyline => polyline.setMap(null));
-        };
     }, [map, path]);
 
     // Handle markers
     useEffect(() => {
-        // Clear existing markers
-        mapMarkers.forEach(marker => marker.setMap(null));
+        // Clear old markers
+        markersRef.current.forEach(marker => marker.setMap(null));
+        markersRef.current = [];
 
         if (map && markers.length > 0) {
-            const newMarkers = markers.map(markerConfig => {
+            markersRef.current = markers.map(markerConfig => {
                 const marker = new window.google.maps.Marker({
                     position: markerConfig.position,
-                    map: map,
+                    map,
                     title: markerConfig.title || '',
                     icon: markerConfig.icon || null
                 });
@@ -105,23 +101,12 @@ const GoogleMapWrapper = ({
                     const infoWindow = new window.google.maps.InfoWindow({
                         content: markerConfig.infoWindow
                     });
-
-                    marker.addListener('click', () => {
-                        infoWindow.open(map, marker);
-                    });
+                    marker.addListener('click', () => infoWindow.open(map, marker));
                 }
 
                 return marker;
             });
-
-            setMapMarkers(newMarkers);
-        } else {
-            setMapMarkers([]);
         }
-
-        return () => {
-            mapMarkers.forEach(marker => marker.setMap(null));
-        };
     }, [map, markers]);
 
     return <div ref={mapRef} style={style} />;

@@ -67,7 +67,7 @@ export default function RideHistory() {
                             />
                         </AccordionSummary>
                         <AccordionDetails>
-                            <List sx={{ width: '100%' }}>
+                            <List sx={{  width: '100%' }}>
                                 {ridesByDate[date].map((ride, rideIndex) => (
                                     <React.Fragment key={rideIndex}>
                                         <ListItem
@@ -87,7 +87,7 @@ export default function RideHistory() {
                                         </ListItem>
                                         {expandedRide === `${dateIndex}-${rideIndex}` && (
                                             <Box sx={{ p: 2, pt: 0 }}>
-                                                <Box sx={{ height: '400px', mb: 2 }}>
+                                                <Box sx={{ height: '600px',  mb: 2 }}>
                                                     <RideMap ride={ride} />
                                                 </Box>
                                                 <RideStats ride={ride} />

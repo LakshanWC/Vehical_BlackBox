@@ -15,12 +15,25 @@ import {
 import MapView from './MapView';
 import { Marker, Popup } from 'react-leaflet';
 import { divIcon } from 'leaflet';
+import GoogleMapWrapper from "../components/GoogleMapWrapper";
 
 const AlertItem = ({ alert }) => {
     const [expanded, setExpanded] = useState(false);
     const [videoUrl, setVideoUrl] = useState(null);
     const [loadingVideo, setLoadingVideo] = useState(false);
     const [videoError, setVideoError] = useState(null);
+
+    const getSpeedColor = (speed) => {
+        if (speed >= 80) return 'red';
+        if (speed >= 70) return 'orange';
+        if (speed >= 60) return 'yellow';
+        return 'green';
+    };
+    const speeds = alert.speedTrajectory?.map(p => parseFloat(p.speed)) || [];
+    const highestSpeed = speeds.length ? Math.max(...speeds) : null;
+    const avgSpeed = speeds.length
+        ? (speeds.reduce((a, b) => a + b, 0) / speeds.length).toFixed(2)
+        : null;
 
     const fetchVideoClip = async () => {
         setLoadingVideo(true);
@@ -150,36 +163,43 @@ const AlertItem = ({ alert }) => {
     const renderSpeedTrajectory = () => {
         if (alert.classification !== 'SPEEDING' || !alert.speedTrajectory) return null;
 
-        const positions = alert.speedTrajectory.map(point => [
-            parseFloat(point.lat),
-            parseFloat(point.lng)
-        ]);
+        const positions = alert.speedTrajectory.map(point => ({
+            lat: parseFloat(point.lat),
+            lng: parseFloat(point.lng),
+            speed: parseFloat(point.speed)
+        }));
 
         return (
             <>
-                {positions.map((position, index) => (
-                    <Marker
-                        key={index}
-                        position={position}
-                        icon={divIcon({
-                            className: `speed-point-${index}`,
-                            html: `<div style="
-                                background: ${index === 0 ? 'green' : index === positions.length - 1 ? 'red' : 'orange'};
-                                width: ${index === 0 || index === positions.length - 1 ? '20px' : '8px'};
-                                height: ${index === 0 || index === positions.length - 1 ? '20px' : '8px'};
-                                border-radius: 50%;
-                                border: 2px solid white;
-                                transform: translate(-6px, -6px);
-                            "></div>`
-                        })}
-                    >
-                        <Popup>
-                            {index === 0 ? 'Start' : index === positions.length - 1 ? 'End' : 'Point ' + (index + 1)}
-                            <br/>
-                            Speed: {alert.speed} km/h
-                        </Popup>
-                    </Marker>
-                ))}
+                {positions.map((point, index) => {
+                    const color = getSpeedColor(point.speed);
+                    const isStart = index === 0;
+                    const isEnd = index === positions.length - 1;
+
+                    return (
+                        <Marker
+                            key={index}
+                            position={[point.lat, point.lng]}
+                            icon={divIcon({
+                                className: `speed-point-${index}`,
+                                html: `<div style="
+                                    background: ${color};
+                                    width: ${isStart || isEnd ? '20px' : '10px'};
+                                    height: ${isStart || isEnd ? '20px' : '10px'};
+                                    border-radius: 50%;
+                                    border: 2px solid white;
+                                    transform: translate(-6px, -6px);
+                                "></div>`
+                            })}
+                        >
+                            <Popup>
+                                {isStart ? 'Start' : isEnd ? 'End' : 'Point ' + (index + 1)}
+                                <br />
+                                Speed: {point.speed} km/h
+                            </Popup>
+                        </Marker>
+                    );
+                })}
             </>
         );
     };
@@ -258,35 +278,53 @@ const AlertItem = ({ alert }) => {
                         </Box>
                     )}
 
+                    {/* === Show highest & average speeds if speeding */}
+                    {isSpeedingAlert && (
+                        <Box sx={{ mb: 2 }}>
+                            <Typography variant="body1">
+                                <strong>Highest Speed:</strong> {highestSpeed ? `${highestSpeed} km/h` : '--'}
+                            </Typography>
+                            <Typography variant="body1">
+                                <strong>Average Speed:</strong> {avgSpeed ? `${avgSpeed} km/h` : '--'}
+                            </Typography>
+                        </Box>
+                    )}
+
                     <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                         <SpeedIcon color="info" sx={{ mr: 1 }} />
                         <Typography variant="body1">
-                            <strong>Speed:</strong> {alert.speed === "waiting-gps" ? "GPS Connecting" : `${alert.speed || '--'} km/h`}
+                            <strong>Current Speed:</strong>{' '}
+                            {alert.speed === 'waiting-gps' ? 'GPS Connecting' : `${alert.speed || '--'} km/h`}
                         </Typography>
                     </Box>
 
                     {alert.location && (
                         <Box sx={{ mt: 2 }}>
                             <Typography variant="h6" gutterBottom>
-                                Location: {alert.location.lat === "waiting-gps" ? "GPS Connecting" : `${alert.location.lat}, ${alert.location.lng}`}
+                                Location:{' '}
+                                {alert.location.lat === 'waiting-gps'
+                                    ? 'GPS Connecting'
+                                    : `${alert.location.lat}, ${alert.location.lng}`}
                             </Typography>
 
-                            {alert.location.lat !== "waiting-gps" ? (
-                                <Box sx={{ height: '300px', borderRadius: 1, overflow: 'hidden' }}>
-                                    <MapView
-                                        center={[parseFloat(alert.location.lat), parseFloat(alert.location.lng)]}
+                            {alert.location.lat !== 'waiting-gps' ? (
+                                <Box sx={{ height: '600px', width: '1000px', borderRadius: 1, overflow: 'hidden' }}>
+                                    <GoogleMapWrapper
+                                        center={{
+                                            lat: parseFloat(alert.location.lat),
+                                            lng: parseFloat(alert.location.lng)
+                                        }}
                                         markers={[{
-                                            position: [parseFloat(alert.location.lat), parseFloat(alert.location.lng)],
-                                            color: isFireAlert ? 'red' : 'blue',
-                                            size: 30,
-                                            popup: isFireAlert ?
-                                                `Fire alert - ${alert.speed || 'unknown speed'}` :
-                                                `Speeding violation - ${alert.speed}`
+                                            position: {
+                                                lat: parseFloat(alert.location.lat),
+                                                lng: parseFloat(alert.location.lng)
+                                            },
+                                            infoWindow: `Speeding violation`
                                         }]}
                                         zoom={15}
-                                    >
-                                        {isSpeedingAlert && renderSpeedTrajectory()}
-                                    </MapView>
+                                    />
+                                    {/* Render trajectory */}
+                                    {renderSpeedTrajectory()}
                                 </Box>
                             ) : (
                                 <Typography color="error" sx={{ py: 2 }}>
