@@ -1,6 +1,23 @@
 // pages/LiveTracking.jsx
 import React, { useEffect, useState, useRef } from 'react';
-import { Box, Typography } from '@mui/material';
+import {
+    Box,
+    Typography,
+    Paper,
+    Card,
+    CardContent,
+    LinearProgress,
+    Chip,
+    Grid
+} from '@mui/material';
+import {
+    Speed as SpeedIcon,
+    LocalFireDepartment as FireIcon,
+    Warning as WarningIcon,
+    TrendingUp as TrendingUpIcon,
+    AccessTime as TimeIcon,
+    DirectionsCar as CarIcon
+} from '@mui/icons-material';
 import { database } from '../Firebase';
 import { ref, onValue } from 'firebase/database';
 import GoogleMapWrapper from '../components/GoogleMapWrapper';
@@ -18,13 +35,104 @@ const createVehicleIcon = (heading) => {
     };
 };
 
+// Speed gauge component
+const SpeedGauge = ({ speed, maxSpeed = 120 }) => {
+    const percentage = Math.min((speed / maxSpeed) * 100, 100);
+    const isSpeeding = speed > 60;
+
+    return (
+        <Paper sx={{ p: 2, textAlign: 'center', background: 'linear-gradient(145deg, #f5f5f5, #e0e0e0)' }}>
+            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <SpeedIcon sx={{ mr: 1 }} /> Live Speed
+            </Typography>
+
+            <Box sx={{ position: 'relative', width: 180, height: 180, margin: '0 auto' }}>
+                {/* Speed value */}
+                <Box sx={{
+                    position: 'absolute',
+                    top: '50%',
+                    left: '50%',
+                    transform: 'translate(-50%, -50%)',
+                    textAlign: 'center'
+                }}>
+                    <Typography variant="h3" fontWeight="bold" color={isSpeeding ? 'error.main' : 'primary.main'}>
+                        {speed.toFixed(0)}
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary">
+                        km/h
+                    </Typography>
+                </Box>
+
+                {/* Progress ring - simplified version */}
+                <Box sx={{
+                    width: '100%',
+                    height: '100%',
+                    borderRadius: '50%',
+                    border: `12px solid ${isSpeeding ? '#f44336' : '#e0e0e0'}`,
+                    borderTop: `12px solid ${isSpeeding ? '#ff7961' : '#1976d2'}`,
+                    borderRight: `12px solid ${isSpeeding ? '#ff7961' : '#1976d2'}`,
+                    borderBottom: `12px solid ${isSpeeding ? '#f44336' : '#e0e0e0'}`,
+                    borderLeft: `12px solid ${isSpeeding ? '#f44336' : '#e0e0e0'}`,
+                    transform: `rotate(${45 + (percentage * 2.7)}deg)`,
+                    transition: 'all 0.3s ease'
+                }} />
+            </Box>
+
+            <LinearProgress
+                variant="determinate"
+                value={percentage}
+                sx={{
+                    height: 8,
+                    borderRadius: 4,
+                    mt: 2,
+                    backgroundColor: '#e0e0e0',
+                    '& .MuiLinearProgress-bar': {
+                        backgroundColor: isSpeeding ? '#f44336' : '#4caf50',
+                        borderRadius: 4
+                    }
+                }}
+            />
+
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+                <Typography variant="caption">0</Typography>
+                <Typography variant="caption" color={isSpeeding ? 'error' : 'inherit'}>
+                    {isSpeeding ? 'OVER LIMIT!' : '60'}
+                </Typography>
+                <Typography variant="caption">{maxSpeed}</Typography>
+            </Box>
+        </Paper>
+    );
+};
+
+// Helper function to calculate distance between coordinates (Haversine formula)
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371; // Earth radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a =
+        Math.sin(dLat/2) * Math.sin(dLat/2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+};
+
 const LiveTracking = () => {
     const [positions, setPositions] = useState([]);
     const [currentPosition, setCurrentPosition] = useState(null);
     const [trips, setTrips] = useState([]);
     const [dataError, setDataError] = useState(null);
     const [mapType, setMapType] = useState('roadmap');
+    const [currentSpeed, setCurrentSpeed] = useState(0);
+    const [alerts, setAlerts] = useState([]);
+    const [tripStats, setTripStats] = useState({
+        distance: 0,
+        avgSpeed: 0,
+        duration: 0,
+        startTime: null
+    });
     const mapRef = useRef(null);
+    const currentTripRef = useRef([]);
 
     // Strict coordinate validation
     const isValidSriLankaCoordinate = (lat, lng) => {
@@ -41,6 +149,42 @@ const LiveTracking = () => {
         }
     };
 
+    // Check for alerts in new data
+    const checkForAlerts = (event) => {
+        const newAlerts = [];
+
+        // Fire detection
+        if (event.fireStatus === "1") {
+            newAlerts.push({ type: 'FIRE', timestamp: new Date(), severity: 'high' });
+        }
+
+        // Accident detection
+        if (event.gforces) {
+            const xG = parseFloat(event.gforces.X) || 0;
+            const yG = parseFloat(event.gforces.Y) || 0;
+            if (xG > 2.5 || yG > 3.0) {
+                newAlerts.push({ type: 'ACCIDENT', timestamp: new Date(), severity: 'critical' });
+            }
+        }
+
+        // Speeding detection
+        if (event.speed && event.speed !== "waiting-gps") {
+            const speed = parseFloat(event.speed);
+            if (speed > 60) {
+                newAlerts.push({
+                    type: 'SPEEDING',
+                    timestamp: new Date(),
+                    severity: 'medium',
+                    speed: speed
+                });
+            }
+        }
+
+        if (newAlerts.length > 0) {
+            setAlerts(prev => [...newAlerts, ...prev.slice(0, 4)]); // Keep only latest 5 alerts
+        }
+    };
+
     useEffect(() => {
         const eventsRef = ref(database, 'event');
         const unsubscribe = onValue(eventsRef, (snapshot) => {
@@ -53,6 +197,10 @@ const LiveTracking = () => {
 
                 snapshot.forEach((childSnapshot) => {
                     const event = childSnapshot.val();
+
+                    // Check for alerts first
+                    checkForAlerts(event);
+
                     if (event.location && event.location.lat !== 'waiting-gps') {
                         const lat = parseFloat(event.location.lat);
                         const lng = parseFloat(event.location.lng);
@@ -62,18 +210,26 @@ const LiveTracking = () => {
                                 lat: lat,
                                 lng: lng,
                                 timestamp: childSnapshot.key,
-                                heading: event.heading || 0
+                                heading: event.heading || 0,
+                                speed: event.speed && event.speed !== "waiting-gps" ? parseFloat(event.speed) : 0
                             };
 
-                            // Trip detection
+                            // Update current speed
+                            if (point.speed > 0) {
+                                setCurrentSpeed(point.speed);
+                            }
+
+                            // Trip detection - 5 minute gap creates new trip
                             if (lastTimestamp && (new Date(point.timestamp) - new Date(lastTimestamp) > 300000)) {
                                 if (currentTrip.length > 0) {
                                     newTrips.push([...currentTrip]);
                                     currentTrip = [];
+                                    currentTripRef.current = [];
                                 }
                             }
 
                             currentTrip.push(point);
+                            currentTripRef.current = currentTrip;
                             newPositions.push({ lat: point.lat, lng: point.lng });
                             lastTimestamp = point.timestamp;
                             validPoints++;
@@ -84,6 +240,37 @@ const LiveTracking = () => {
                 if (validPoints === 0) {
                     setDataError('No valid GPS data found');
                     return;
+                }
+
+                // Calculate trip statistics
+                if (currentTrip.length > 1) {
+                    const startTime = new Date(currentTrip[0].timestamp);
+                    const endTime = new Date(currentTrip[currentTrip.length - 1].timestamp);
+                    const durationMs = endTime - startTime;
+
+                    // Calculate distance
+                    let distance = 0;
+                    for (let i = 1; i < currentTrip.length; i++) {
+                        const prev = currentTrip[i-1];
+                        const curr = currentTrip[i];
+                        distance += calculateDistance(prev.lat, prev.lng, curr.lat, curr.lng);
+                    }
+
+                    // Calculate average speed
+                    const speeds = currentTrip
+                        .filter(point => point.speed > 0)
+                        .map(point => point.speed);
+
+                    const avgSpeed = speeds.length > 0
+                        ? speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length
+                        : 0;
+
+                    setTripStats({
+                        distance: parseFloat(distance.toFixed(2)),
+                        avgSpeed: parseFloat(avgSpeed.toFixed(1)),
+                        duration: durationMs,
+                        startTime: startTime
+                    });
                 }
 
                 // Final trip addition
@@ -125,7 +312,7 @@ const LiveTracking = () => {
         markers.push({
             position: { lat: currentPosition.lat, lng: currentPosition.lng },
             title: 'Current Position',
-            icon: createVehicleIcon(currentPosition.heading)
+            icon: createVehicleIcon(currentPosition.heading || 0)
         });
     }
 
@@ -164,72 +351,198 @@ const LiveTracking = () => {
         }
     });
 
+    // Format duration for display
+    const formatDuration = (ms) => {
+        if (!ms) return '00:00:00';
+        const seconds = Math.floor((ms / 1000) % 60);
+        const minutes = Math.floor((ms / (1000 * 60)) % 60);
+        const hours = Math.floor(ms / (1000 * 60 * 60));
+
+        return [
+            hours.toString().padStart(2, '0'),
+            minutes.toString().padStart(2, '0'),
+            seconds.toString().padStart(2, '0')
+        ].join(':');
+    };
+
     return (
-        <Box sx={{ height: '100vh', width: '100%', position: 'relative' }}>
-            {dataError && (
+        <Box sx={{ height: '100vh', width: '100%', position: 'relative', display: 'flex' }}>
+            {/* Sidebar with metrics */}
+            <Paper sx={{
+                width: 320,
+                p: 2,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
+                borderRadius: 0,
+                boxShadow: 3,
+                zIndex: 1000
+            }}>
+                {/* Speed Gauge */}
+                <SpeedGauge speed={currentSpeed} />
+
+                {/* Trip Statistics */}
+                <Paper sx={{ p: 2 }}>
+                    <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                        <TrendingUpIcon sx={{ mr: 1 }} /> Trip Statistics
+                    </Typography>
+
+                    <Grid container spacing={2}>
+                        <Grid item xs={6}>
+                            <Box sx={{ textAlign: 'center' }}>
+                                <Typography variant="h4" color="primary" fontWeight="bold">
+                                    {tripStats.distance}
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                    km
+                                </Typography>
+                            </Box>
+                        </Grid>
+
+                        <Grid item xs={6}>
+                            <Box sx={{ textAlign: 'center' }}>
+                                <Typography variant="h4" color="primary" fontWeight="bold">
+                                    {tripStats.avgSpeed}
+                                </Typography>
+                                <Typography variant="body2" color="text.secondary">
+                                    km/h avg
+                                </Typography>
+                            </Box>
+                        </Grid>
+
+                        <Grid item xs={12}>
+                            <Box sx={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: 1
+                            }}>
+                                <TimeIcon color="action" />
+                                <Typography variant="h6">
+                                    {formatDuration(tripStats.duration)}
+                                </Typography>
+                            </Box>
+                        </Grid>
+                    </Grid>
+                </Paper>
+
+                {/* Active Alerts */}
+                {alerts.length > 0 && (
+                    <Paper sx={{ p: 2 }}>
+                        <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                            <WarningIcon sx={{ mr: 1, color: 'warning.main' }} /> Active Alerts
+                        </Typography>
+
+                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                            {alerts.map((alert, index) => (
+                                <Chip
+                                    key={index}
+                                    icon={alert.type === 'FIRE' ? <FireIcon /> : <WarningIcon />}
+                                    label={`${alert.type} - ${new Date(alert.timestamp).toLocaleTimeString()}`}
+                                    color={
+                                        alert.severity === 'critical' ? 'error' :
+                                            alert.severity === 'high' ? 'warning' : 'info'
+                                    }
+                                    variant="filled"
+                                    size="small"
+                                />
+                            ))}
+                        </Box>
+                    </Paper>
+                )}
+
+                {/* Vehicle Status */}
+                <Paper sx={{ p: 2 }}>
+                    <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                        <CarIcon sx={{ mr: 1 }} /> Vehicle Status
+                    </Typography>
+
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <Typography variant="body2">Connection:</Typography>
+                        <Chip
+                            label="Live"
+                            size="small"
+                            color="success"
+                            variant="outlined"
+                        />
+                    </Box>
+
+                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+                        <Typography variant="body2">Last update:</Typography>
+                        <Typography variant="body2">
+                            {currentPosition ? new Date(currentPosition.timestamp).toLocaleTimeString() : 'N/A'}
+                        </Typography>
+                    </Box>
+                </Paper>
+            </Paper>
+
+            {/* Map Area */}
+            <Box sx={{ flex: 1, position: 'relative' }}>
+                {dataError && (
+                    <Box sx={{
+                        position: 'absolute',
+                        top: 10,
+                        left: 10,
+                        zIndex: 1000,
+                        backgroundColor: 'white',
+                        padding: 2,
+                        borderRadius: 1,
+                        boxShadow: 3
+                    }}>
+                        <Typography color="error">{dataError}</Typography>
+                    </Box>
+                )}
+
                 <Box sx={{
                     position: 'absolute',
                     top: 10,
-                    left: 10,
+                    right: 10,
                     zIndex: 1000,
                     backgroundColor: 'white',
-                    padding: 2,
+                    padding: 1,
                     borderRadius: 1,
-                    boxShadow: 3
+                    boxShadow: 3,
+                    display: 'flex',
+                    gap: 1
                 }}>
-                    <Typography color="error">{dataError}</Typography>
+                    <button
+                        onClick={() => setMapType('roadmap')}
+                        style={{
+                            padding: '5px 10px',
+                            backgroundColor: mapType === 'roadmap' ? '#1976d2' : '#f5f5f5',
+                            color: mapType === 'roadmap' ? 'white' : 'black',
+                            border: '1px solid #ccc',
+                            borderRadius: '3px',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        Normal
+                    </button>
+                    <button
+                        onClick={() => setMapType('satellite')}
+                        style={{
+                            padding: '5px 10px',
+                            backgroundColor: mapType === 'satellite' ? '#1976d2' : '#f5f5f5',
+                            color: mapType === 'satellite' ? 'white' : 'black',
+                            border: '1px solid #ccc',
+                            borderRadius: '3px',
+                            cursor: 'pointer'
+                        }}
+                    >
+                        Satellite
+                    </button>
                 </Box>
-            )}
 
-            <Box sx={{
-                position: 'absolute',
-                top: 10,
-                right: 10,
-                zIndex: 1000,
-                backgroundColor: 'white',
-                padding: 1,
-                borderRadius: 1,
-                boxShadow: 3,
-                display: 'flex',
-                gap: 1
-            }}>
-                <button
-                    onClick={() => setMapType('roadmap')}
-                    style={{
-                        padding: '5px 10px',
-                        backgroundColor: mapType === 'roadmap' ? '#1976d2' : '#f5f5f5',
-                        color: mapType === 'roadmap' ? 'white' : 'black',
-                        border: '1px solid #ccc',
-                        borderRadius: '3px',
-                        cursor: 'pointer'
-                    }}
-                >
-                    Normal
-                </button>
-                <button
-                    onClick={() => setMapType('satellite')}
-                    style={{
-                        padding: '5px 10px',
-                        backgroundColor: mapType === 'satellite' ? '#1976d2' : '#f5f5f5',
-                        color: mapType === 'satellite' ? 'white' : 'black',
-                        border: '1px solid #ccc',
-                        borderRadius: '3px',
-                        cursor: 'pointer'
-                    }}
-                >
-                    Satellite
-                </button>
+                <GoogleMapWrapper
+                    center={currentPosition ? { lat: currentPosition.lat, lng: currentPosition.lng } : { lat: 6.9271, lng: 79.8612 }}
+                    zoom={15}
+                    path={positions}
+                    markers={markers}
+                    onMapLoad={handleMapLoad}
+                    mapTypeId={mapType}
+                    style={{ height: '100%', width: '100%' }}
+                />
             </Box>
-
-            <GoogleMapWrapper
-                center={currentPosition ? { lat: currentPosition.lat, lng: currentPosition.lng } : { lat: 6.9271, lng: 79.8612 }}
-                zoom={15}
-                path={positions}
-                markers={markers}
-                onMapLoad={handleMapLoad}
-                mapTypeId={mapType}
-                style={{ height: '600px', width: '100%' }}
-            />
         </Box>
     );
 };
