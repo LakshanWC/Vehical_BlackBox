@@ -168,6 +168,7 @@ const Accidents = () => {
                         <TableCell>Time</TableCell>
                         <TableCell>Location</TableCell>
                         <TableCell>Speed</TableCell>
+                        <TableCell>Speed Points</TableCell>
                         {(tabValue === 0 || tabValue === 1) && <TableCell>Status</TableCell>}
                         {(tabValue === 0 || tabValue === 1) && <TableCell>Impact</TableCell>}
                     </TableRow>
@@ -208,6 +209,12 @@ const Accidents = () => {
                                 <TableCell>
                                     {incident.speed === "waiting-gps" ? "GPS Connecting" : `${incident.speed} km/h`}
                                 </TableCell>
+                                <TableCell>
+                                    {incident.speedTrajectory && incident.speedTrajectory.path ?
+                                        `${incident.speedTrajectory.path.length} violation points` :
+                                        'No trajectory data'
+                                    }
+                                </TableCell>
                                 {(tabValue === 0 || tabValue === 1) && (
                                     <TableCell>
                                         <Chip
@@ -227,7 +234,7 @@ const Accidents = () => {
                         ))
                     ) : (
                         <TableRow>
-                            <TableCell colSpan={(tabValue === 2 || tabValue === 3) ? 5 : 7} align="center">
+                            <TableCell colSpan={(tabValue === 2 || tabValue === 3) ? 6 : 8} align="center">
                                 No {tabValue === 0 ? 'accidents' :
                                 tabValue === 1 ? 'bumps' :
                                     tabValue === 2 ? 'speeding violations' : 'fire alerts'} found

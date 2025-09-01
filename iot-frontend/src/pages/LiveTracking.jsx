@@ -133,6 +133,9 @@ const LiveTracking = () => {
     });
     const mapRef = useRef(null);
     const currentTripRef = useRef([]);
+    const [speedTrajectory, setSpeedTrajectory] = useState([]);
+
+
 
     // Strict coordinate validation
     const isValidSriLankaCoordinate = (lat, lng) => {
@@ -147,6 +150,16 @@ const LiveTracking = () => {
         } catch {
             return false;
         }
+    };
+
+    //process speed vilotaion
+    const processSpeedViolations = (trip) => {
+        const violations = trip.filter(point =>
+        point.speed &&
+        point.speed > 60 &&
+        point.lat && point.lng
+        );
+        setSpeedTrajectory(violations);
     };
 
     // Check for alerts in new data
@@ -276,6 +289,9 @@ const LiveTracking = () => {
                 // Final trip addition
                 if (currentTrip.length > 0) {
                     newTrips.push(currentTrip);
+
+                    //Process speed violations
+                    processSpeedViolations(currentTrip);
                 }
 
                 setPositions(newPositions);
@@ -315,6 +331,25 @@ const LiveTracking = () => {
             icon: createVehicleIcon(currentPosition.heading || 0)
         });
     }
+    //Speed Violation Markers
+    speedTrajectory.forEach((violation) => {
+        markers.push({
+            position: { lat: violation.lat, lng: violation.lng },
+            title: `Speed Violation: ${violation.speed} km/h`,
+            icon: {
+                url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                    <circle cx="8" cy="8" r="6" fill="#FF6B00" stroke="white" stroke-width="2"/>
+                    <text x="8" y="10" text-anchor="middle" fill="white" font-size="8" font-weight="bold">
+                        ${Math.round(violation.speed)}
+                    </text>
+                </svg>
+            `),
+                scaledSize: new window.google.maps.Size(16, 16),
+                anchor: new window.google.maps.Point(8, 8)
+            }
+        });
+    });
 
     // Trip Markers
     trips.forEach((trip, tripIndex) => {

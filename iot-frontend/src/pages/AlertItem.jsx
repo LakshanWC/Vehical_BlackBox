@@ -308,23 +308,44 @@ const AlertItem = ({ alert }) => {
                             </Typography>
 
                             {alert.location.lat !== 'waiting-gps' ? (
+                                // In the renderSimpleAlert function, update the map section:
                                 <Box sx={{ height: '600px', width: '1000px', borderRadius: 1, overflow: 'hidden' }}>
                                     <GoogleMapWrapper
                                         center={{
                                             lat: parseFloat(alert.location.lat),
                                             lng: parseFloat(alert.location.lng)
                                         }}
-                                        markers={[{
-                                            position: {
-                                                lat: parseFloat(alert.location.lat),
-                                                lng: parseFloat(alert.location.lng)
+                                        markers={[
+                                            {
+                                                position: {
+                                                    lat: parseFloat(alert.location.lat),
+                                                    lng: parseFloat(alert.location.lng)
+                                                },
+                                                infoWindow: `Current Speed: ${alert.speed} km/h`
                                             },
-                                            infoWindow: `Speeding violation`
-                                        }]}
+                                            // Add speed violation trajectory markers
+                                            ...(alert.speedTrajectory || []).map((point, index) => ({
+                                                position: {
+                                                    lat: parseFloat(point.lat),
+                                                    lng: parseFloat(point.lng)
+                                                },
+                                                title: `Speed: ${point.speed} km/h`,
+                                                icon: {
+                                                    url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14">
+                                                        <circle cx="7" cy="7" r="5" fill="${point.speed > 80 ? '#ff0000' : point.speed > 70 ? '#ff6b00' : '#ffd700'}" stroke="white" stroke-width="1"/>
+                                                        <text x="7" y="9" text-anchor="middle" fill="white" font-size="5" font-weight="bold">
+                                                            ${Math.round(point.speed)}
+                                                        </text>
+                                                    </svg>
+                    `),
+                                                    scaledSize: new window.google.maps.Size(14, 14),
+                                                    anchor: new window.google.maps.Point(7, 7)
+                                                }
+                                            }))
+                                        ]}
                                         zoom={15}
                                     />
-                                    {/* Render trajectory */}
-                                    {renderSpeedTrajectory()}
                                 </Box>
                             ) : (
                                 <Typography color="error" sx={{ py: 2 }}>

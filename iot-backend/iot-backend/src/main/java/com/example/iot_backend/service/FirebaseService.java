@@ -141,6 +141,16 @@ public class FirebaseService {
             return;
         }
 
+        //add speed location data
+        Map<String, Object> locationWithSpeed = new HashMap<>(currentLocation);
+        if (reading.getSpeed() != null && !reading.getSpeed().equals("waiting-gps")) {
+            try {
+                locationWithSpeed.put("speed", Double.parseDouble(reading.getSpeed().replace(" km/h", "")));
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid speed format for trajectory: {}", reading.getSpeed());
+            }
+        }
+
         // Initialize trajectory for device if not exists
         deviceTrajectories.putIfAbsent(deviceId, new ArrayList<>());
 
