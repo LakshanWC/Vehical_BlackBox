@@ -94,3 +94,20 @@ export const calculateRideStats = (ride) => {
         distance: distance.toFixed(2)
     };
 };
+// speed trajectory maker
+export const processSpeedTrajectory = (ridePoints) => {
+    if (!ridePoints || ridePoints.length === 0) return [];
+
+    return ridePoints.filter(
+        point =>
+        point.speed &&
+        point.speed !== "waiting-gps" &&
+        parseFloat(point.speed) > 60
+    )
+        .map(point => ({
+            lat: parseFloat(point.location?.lat),
+            lng: parseFloat(point.location?.lng),
+            speed: parseFloat(point.speed),
+            timestamp: point.timestamp
+        }));
+};

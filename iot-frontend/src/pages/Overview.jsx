@@ -20,7 +20,7 @@ const Overview = () => {
                 const alertDate = new Date(childSnapshot.key);
                 const hoursDiff = (now - alertDate) / (1000 * 60 * 60);
 
-                if (hoursDiff <= 48) {
+                if (hoursDiff <= 172) {
                     const classification = classifyAlert(alertData);
                     data.push({
                         ...alertData,
@@ -41,7 +41,13 @@ const Overview = () => {
             return 'GPS_DISCONNECTED';
         }
         if (alert.fireStatus === 1) return 'FIRE';
-        if (alert.speed && parseFloat(alert.speed.replace(' km/h', '')) > 60) return 'SPEEDING';
+        if (alert.speed && parseFloat(alert.speed.replace(' km/h', '')) > 60) {
+            //add speed trajectory for speed violations
+            if (alert.speedTrajectory) {
+                return 'SPEEDING';
+            }
+            return 'SPEEDING';
+        }
         if (!alert.gforces || !alert.gyro) return 'OTHER';
 
         try {
