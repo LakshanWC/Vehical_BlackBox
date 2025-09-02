@@ -134,6 +134,13 @@ const LiveTracking = () => {
     const mapRef = useRef(null);
     const currentTripRef = useRef([]);
     const [speedTrajectory, setSpeedTrajectory] = useState([]);
+    const [currentRideActive, setCurrentRideActive] = useState(false);
+
+    const checkRideActivity = (lastUpdateTime) => {
+        const now = Date.now();
+        const timeDiff = now - lastUpdateTime;
+        return timeDiff < 30000;
+    }
 
 
 
@@ -252,38 +259,59 @@ const LiveTracking = () => {
 
                 if (validPoints === 0) {
                     setDataError('No valid GPS data found');
+                    setCurrentRideActive(false); //reset ride status
                     return;
                 }
 
                 // Calculate trip statistics
                 if (currentTrip.length > 1) {
-                    const startTime = new Date(currentTrip[0].timestamp);
-                    const endTime = new Date(currentTrip[currentTrip.length - 1].timestamp);
-                    const durationMs = endTime - startTime;
+                    const lastUpdateTime = new Date(currentTrip[currentTrip.length - 1].timestamp).getTime();
+                    const isRideActive = checkRideActivity(lastUpdateTime);
+                    setCurrentRideActive(isRideActive);
 
-                    // Calculate distance
-                    let distance = 0;
-                    for (let i = 1; i < currentTrip.length; i++) {
-                        const prev = currentTrip[i-1];
-                        const curr = currentTrip[i];
-                        distance += calculateDistance(prev.lat, prev.lng, curr.lat, curr.lng);
+                    if (isRideActive) {
+                        // Only calculate stats if ride is active
+                        const startTime = new Date(currentTrip[0].timestamp);
+                        const endTime = new Date(currentTrip[currentTrip.length - 1].timestamp);
+                        const durationMs = endTime - startTime;
+
+                        // Calculate distance
+                        let distance = 0;
+                        for (let i = 1; i < currentTrip.length; i++) {
+                            const prev = currentTrip[i-1];
+                            const curr = currentTrip[i];
+                            distance += calculateDistance(prev.lat, prev.lng, curr.lat, curr.lng);
+                        }
+
+                        // Calculate average speed
+                        const speeds = currentTrip
+                            .filter(point => point.speed > 0)
+                            .map(point => point.speed);
+
+                        const avgSpeed = speeds.length > 0
+                            ? speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length
+                            : 0;
+
+                        setTripStats({
+                            distance: parseFloat(distance.toFixed(2)),
+                            avgSpeed: parseFloat(avgSpeed.toFixed(1)),
+                            duration: durationMs,
+                            startTime: startTime,
+                            isActive: true
+                        });
+                    } else {
+                        // Clear trip stats when ride ends
+                        setTripStats({
+                            distance: 0,
+                            avgSpeed: 0,
+                            duration: 0,
+                            startTime: null,
+                            isActive: false
+                        });
+                        setCurrentPosition(null);
+                        setPositions([]);
+                        setTrips([]);
                     }
-
-                    // Calculate average speed
-                    const speeds = currentTrip
-                        .filter(point => point.speed > 0)
-                        .map(point => point.speed);
-
-                    const avgSpeed = speeds.length > 0
-                        ? speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length
-                        : 0;
-
-                    setTripStats({
-                        distance: parseFloat(distance.toFixed(2)),
-                        avgSpeed: parseFloat(avgSpeed.toFixed(1)),
-                        duration: durationMs,
-                        startTime: startTime
-                    });
                 }
 
                 // Final trip addition
@@ -413,103 +441,119 @@ const LiveTracking = () => {
                 boxShadow: 3,
                 zIndex: 1000
             }}>
-                {/* Speed Gauge */}
-                <SpeedGauge speed={currentSpeed} />
+                {currentRideActive ? (
+                    <>
+                        {/* Speed Gauge */}
+                        <SpeedGauge speed={currentSpeed} />
 
-                {/* Trip Statistics */}
-                <Paper sx={{ p: 2 }}>
-                    <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
-                        <TrendingUpIcon sx={{ mr: 1 }} /> Trip Statistics
-                    </Typography>
+                        {/* Trip Statistics - ONLY show when ride is active */}
+                        <Paper sx={{ p: 2 }}>
+                            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                                <TrendingUpIcon sx={{ mr: 1 }} /> Live Trip Statistics
+                            </Typography>
 
-                    <Grid container spacing={2}>
-                        <Grid item xs={6}>
-                            <Box sx={{ textAlign: 'center' }}>
-                                <Typography variant="h4" color="primary" fontWeight="bold">
-                                    {tripStats.distance}
+                            <Grid container spacing={2}>
+                                <Grid item xs={6}>
+                                    <Box sx={{ textAlign: 'center' }}>
+                                        <Typography variant="h4" color="primary" fontWeight="bold">
+                                            {tripStats.distance}
+                                        </Typography>
+                                        <Typography variant="body2" color="text.secondary">
+                                            km
+                                        </Typography>
+                                    </Box>
+                                </Grid>
+
+                                <Grid item xs={6}>
+                                    <Box sx={{ textAlign: 'center' }}>
+                                        <Typography variant="h4" color="primary" fontWeight="bold">
+                                            {tripStats.avgSpeed}
+                                        </Typography>
+                                        <Typography variant="body2" color="text.secondary">
+                                            km/h avg
+                                        </Typography>
+                                    </Box>
+                                </Grid>
+
+                                <Grid item xs={12}>
+                                    <Box sx={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        gap: 1
+                                    }}>
+                                        <TimeIcon color="action" />
+                                        <Typography variant="h6">
+                                            {formatDuration(tripStats.duration)}
+                                        </Typography>
+                                    </Box>
+                                </Grid>
+                            </Grid>
+                        </Paper>
+
+                        {/* Active Alerts */}
+                        {alerts.length > 0 && (
+                            <Paper sx={{ p: 2 }}>
+                                <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                                    <WarningIcon sx={{ mr: 1, color: 'warning.main' }} /> Active Alerts
                                 </Typography>
-                                <Typography variant="body2" color="text.secondary">
-                                    km
-                                </Typography>
-                            </Box>
-                        </Grid>
+                                <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                                    {alerts.map((alert, index) => (
+                                        <Chip
+                                            key={index}
+                                            icon={alert.type === 'FIRE' ? <FireIcon /> : <WarningIcon />}
+                                            label={`${alert.type} - ${new Date(alert.timestamp).toLocaleTimeString()}`}
+                                            color={
+                                                alert.severity === 'critical' ? 'error' :
+                                                    alert.severity === 'high' ? 'warning' : 'info'
+                                            }
+                                            variant="filled"
+                                            size="small"
+                                        />
+                                    ))}
+                                </Box>
+                            </Paper>
+                        )}
 
-                        <Grid item xs={6}>
-                            <Box sx={{ textAlign: 'center' }}>
-                                <Typography variant="h4" color="primary" fontWeight="bold">
-                                    {tripStats.avgSpeed}
-                                </Typography>
-                                <Typography variant="body2" color="text.secondary">
-                                    km/h avg
-                                </Typography>
-                            </Box>
-                        </Grid>
+                        {/* Vehicle Status - ONLY show when ride is active */}
+                        <Paper sx={{ p: 2 }}>
+                            <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
+                                <CarIcon sx={{ mr: 1 }} /> Vehicle Status
+                            </Typography>
 
-                        <Grid item xs={12}>
-                            <Box sx={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                gap: 1
-                            }}>
-                                <TimeIcon color="action" />
-                                <Typography variant="h6">
-                                    {formatDuration(tripStats.duration)}
-                                </Typography>
-                            </Box>
-                        </Grid>
-                    </Grid>
-                </Paper>
-
-                {/* Active Alerts */}
-                {alerts.length > 0 && (
-                    <Paper sx={{ p: 2 }}>
-                        <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
-                            <WarningIcon sx={{ mr: 1, color: 'warning.main' }} /> Active Alerts
-                        </Typography>
-
-                        <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-                            {alerts.map((alert, index) => (
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <Typography variant="body2">Connection:</Typography>
                                 <Chip
-                                    key={index}
-                                    icon={alert.type === 'FIRE' ? <FireIcon /> : <WarningIcon />}
-                                    label={`${alert.type} - ${new Date(alert.timestamp).toLocaleTimeString()}`}
-                                    color={
-                                        alert.severity === 'critical' ? 'error' :
-                                            alert.severity === 'high' ? 'warning' : 'info'
-                                    }
-                                    variant="filled"
+                                    label="Live"
                                     size="small"
+                                    color="success"
+                                    variant="outlined"
                                 />
-                            ))}
-                        </Box>
+                            </Box>
+
+                            <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
+                                <Typography variant="body2">Last update:</Typography>
+                                <Typography variant="body2">
+                                    {currentPosition ? new Date(currentPosition.timestamp).toLocaleTimeString() : 'N/A'}
+                                </Typography>
+                            </Box>
+                        </Paper>
+                    </>
+                ) : (
+                    /* Show this when no active ride */
+                    <Paper sx={{ p: 2, textAlign: 'center' }}>
+                        <CarIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                        <Typography variant="h6" color="text.secondary" gutterBottom>
+                            No Active Ride
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                            Vehicle is currently stationary.
+                            Trip statistics will appear when a ride begins.
+                        </Typography>
                     </Paper>
                 )}
-
-                {/* Vehicle Status */}
-                <Paper sx={{ p: 2 }}>
-                    <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
-                        <CarIcon sx={{ mr: 1 }} /> Vehicle Status
-                    </Typography>
-
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <Typography variant="body2">Connection:</Typography>
-                        <Chip
-                            label="Live"
-                            size="small"
-                            color="success"
-                            variant="outlined"
-                        />
-                    </Box>
-
-                    <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
-                        <Typography variant="body2">Last update:</Typography>
-                        <Typography variant="body2">
-                            {currentPosition ? new Date(currentPosition.timestamp).toLocaleTimeString() : 'N/A'}
-                        </Typography>
-                    </Box>
-                </Paper>
             </Paper>
+
 
             {/* Map Area */}
             <Box sx={{ flex: 1, position: 'relative' }}>
