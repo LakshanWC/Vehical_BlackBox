@@ -4,11 +4,9 @@ import {
     Box,
     Typography,
     Paper,
-    Card,
-    CardContent,
-    LinearProgress,
     Chip,
-    Grid
+    Grid,
+    LinearProgress
 } from '@mui/material';
 import {
     Speed as SpeedIcon,
@@ -21,6 +19,11 @@ import {
 import { database } from '../Firebase';
 import { ref, onValue } from 'firebase/database';
 import GoogleMapWrapper from '../components/GoogleMapWrapper';
+
+// Constants
+const RIDE_TIMEOUT_MS = 30000; // 30 seconds
+const STATIONARY_THRESHOLD = 0.0001; // ~11 meters
+const DATA_RETENTION_MS = 300000; // 5 minutes for data cleanup
 
 // Create vehicle icon with heading
 const createVehicleIcon = (heading) => {
@@ -47,7 +50,6 @@ const SpeedGauge = ({ speed, maxSpeed = 120 }) => {
             </Typography>
 
             <Box sx={{ position: 'relative', width: 180, height: 180, margin: '0 auto' }}>
-                {/* Speed value */}
                 <Box sx={{
                     position: 'absolute',
                     top: '50%',
@@ -63,7 +65,6 @@ const SpeedGauge = ({ speed, maxSpeed = 120 }) => {
                     </Typography>
                 </Box>
 
-                {/* Progress ring - simplified version */}
                 <Box sx={{
                     width: '100%',
                     height: '100%',
@@ -104,9 +105,9 @@ const SpeedGauge = ({ speed, maxSpeed = 120 }) => {
     );
 };
 
-// Helper function to calculate distance between coordinates (Haversine formula)
+// Helper function to calculate distance between coordinates
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
-    const R = 6371; // Earth radius in km
+    const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const a =
@@ -115,15 +116,54 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
         Math.sin(dLon/2) * Math.sin(dLon/2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
     const distance = R * c;
-
-    // Return 0 if distance is too small (stationary movement)
     return distance < 0.01 ? 0 : distance;
 };
 
+// Strict coordinate validation
+const isValidSriLankaCoordinate = (lat, lng) => {
+    try {
+        const numLat = Number(lat);
+        const numLng = Number(lng);
+        return (
+            !isNaN(numLat) && !isNaN(numLng) &&
+            numLat >= 5.5 && numLat <= 10 &&
+            numLng >= 79 && numLng <= 82
+        );
+    } catch {
+        return false;
+    }
+};
+
+// Check if point is stationary
+const isStationaryPoint = (point1, point2, threshold = STATIONARY_THRESHOLD) => {
+    if (!point1 || !point2) return false;
+    const latDiff = Math.abs(point1.lat - point2.lat);
+    const lngDiff = Math.abs(point1.lng - point2.lng);
+    return latDiff < threshold && lngDiff < threshold;
+};
+
+// Filter out stationary points
+const filterStationaryPoints = (points) => {
+    if (points.length < 2) return points;
+
+    const filtered = [points[0]];
+
+    for (let i = 1; i < points.length; i++) {
+        const current = points[i];
+        const previous = filtered[filtered.length - 1];
+
+        if (!isStationaryPoint(current, previous)) {
+            filtered.push(current);
+        }
+    }
+
+    return filtered;
+};
+
 const LiveTracking = () => {
-    const [positions, setPositions] = useState([]);
+    const [currentRide, setCurrentRide] = useState([]);
+    const [rideHistory, setRideHistory] = useState([]);
     const [currentPosition, setCurrentPosition] = useState(null);
-    const [trips, setTrips] = useState([]);
     const [dataError, setDataError] = useState(null);
     const [mapType, setMapType] = useState('roadmap');
     const [currentSpeed, setCurrentSpeed] = useState(0);
@@ -132,82 +172,18 @@ const LiveTracking = () => {
         distance: 0,
         avgSpeed: 0,
         duration: 0,
-        startTime: null
+        startTime: null,
+        isActive: false
     });
-    const mapRef = useRef(null);
-    const currentTripRef = useRef([]);
     const [speedTrajectory, setSpeedTrajectory] = useState([]);
-    const [currentRideActive, setCurrentRideActive] = useState(false);
+    const mapRef = useRef(null);
 
-    const checkRideActivity = (lastUpdateTime) => {
-        const now = Date.now();
-        const timeDiff = now - lastUpdateTime;
-        return timeDiff < 30000;
-    }
-
-
-
-    // Strict coordinate validation
-    const isValidSriLankaCoordinate = (lat, lng) => {
-        try {
-            const numLat = Number(lat);
-            const numLng = Number(lng);
-            return (
-                !isNaN(numLat) && !isNaN(numLng) &&
-                numLat >= 5.5 && numLat <= 10 &&
-                numLng >= 79 && numLng <= 82
-            );
-        } catch {
-            return false;
-        }
-    };
-
-    //process speed vilotaion
-    const processSpeedViolations = (trip) => {
-        const violations = trip.filter(point => {
-            // Filter out stationary points and invalid coordinates
-            if (!point.lat || !point.lng || point.speed <= 60) return false;
-
-            // Check if this point is significantly different from previous points
-            const recentViolations = speedTrajectory.slice(-5);
-            const isDuplicate = recentViolations.some(violation =>
-                Math.abs(violation.lat - point.lat) < 0.0001 &&
-                Math.abs(violation.lng - point.lng) < 0.0001
-            );
-
-            return !isDuplicate;
-        });
-
-        setSpeedTrajectory(prev => {
-            // Keep only violations from last 5 minutes
-            const fiveMinutesAgo = Date.now() - 300000;
-            const recentViolations = prev.filter(v =>
-                new Date(v.timestamp).getTime() > fiveMinutesAgo
-            );
-            return [...recentViolations, ...violations];
-        });
-    };
-
-        setSpeedTrajectory(prev => {
-            // Keep only violations from last 5 minutes to prevent memory buildup
-            const fiveMinutesAgo = Date.now() - 300000;
-            const recentViolations = prev.filter(v =>
-                new Date(v.timestamp).getTime() > fiveMinutesAgo
-            );
-            return [...recentViolations, ...violations];
-        });
-    };
-
-    // Check for alerts in new data
+    // Check for alerts
     const checkForAlerts = (event) => {
         const newAlerts = [];
-
-        // Fire detection
         if (event.fireStatus === "1") {
             newAlerts.push({ type: 'FIRE', timestamp: new Date(), severity: 'high' });
         }
-
-        // Accident detection
         if (event.gforces) {
             const xG = parseFloat(event.gforces.X) || 0;
             const yG = parseFloat(event.gforces.Y) || 0;
@@ -215,8 +191,6 @@ const LiveTracking = () => {
                 newAlerts.push({ type: 'ACCIDENT', timestamp: new Date(), severity: 'critical' });
             }
         }
-
-        // Speeding detection
         if (event.speed && event.speed !== "waiting-gps") {
             const speed = parseFloat(event.speed);
             if (speed > 60) {
@@ -228,10 +202,158 @@ const LiveTracking = () => {
                 });
             }
         }
-
         if (newAlerts.length > 0) {
-            setAlerts(prev => [...newAlerts, ...prev.slice(0, 4)]); // Keep only latest 5 alerts
+            setAlerts(prev => [...newAlerts, ...prev.slice(0, 4)]);
         }
+    };
+
+    // Process ride data with proper segmentation
+    const processRideData = (events) => {
+        const rides = [];
+        let currentRideEvents = [];
+        let lastTimestamp = null;
+
+        // Sort events by timestamp
+        events.sort((a, b) => a.rawTime - b.rawTime);
+
+        events.forEach(event => {
+            const eventTime = event.rawTime;
+
+            // Check if this starts a new ride (30+ second gap)
+            if (lastTimestamp !== null && (eventTime - lastTimestamp > RIDE_TIMEOUT_MS)) {
+                // Save current ride if it has valid data
+                if (currentRideEvents.length >= 2) {
+                    const filteredRide = filterStationaryPoints(currentRideEvents);
+                    if (filteredRide.length >= 2) {
+                        rides.push(filteredRide);
+                    }
+                }
+                currentRideEvents = [];
+            }
+
+            // Add valid GPS points to current ride
+            if (event.location && event.location.lat !== 'waiting-gps') {
+                const lat = parseFloat(event.location.lat);
+                const lng = parseFloat(event.location.lng);
+
+                if (isValidSriLankaCoordinate(lat, lng)) {
+                    currentRideEvents.push({
+                        lat,
+                        lng,
+                        timestamp: event.timestamp,
+                        rawTime: event.rawTime,
+                        speed: event.speed && event.speed !== "waiting-gps" ?
+                            parseFloat(event.speed) : 0,
+                        heading: event.heading || 0
+                    });
+                }
+            }
+
+            lastTimestamp = eventTime;
+        });
+
+        // Add the final ride
+        if (currentRideEvents.length >= 2) {
+            const filteredRide = filterStationaryPoints(currentRideEvents);
+            if (filteredRide.length >= 2) {
+                rides.push(filteredRide);
+            }
+        }
+
+        return rides;
+    };
+
+    // Calculate trip statistics
+    const calculateTripStats = (ride) => {
+        if (!ride || ride.length < 2) {
+            return {
+                distance: 0,
+                avgSpeed: 0,
+                duration: 0,
+                startTime: null,
+                isActive: false
+            };
+        }
+
+        const startTime = new Date(ride[0].timestamp);
+        const endTime = new Date(ride[ride.length - 1].timestamp);
+        const durationMs = endTime - startTime;
+
+        let distance = 0;
+        const speeds = [];
+
+        for (let i = 1; i < ride.length; i++) {
+            const prev = ride[i-1];
+            const curr = ride[i];
+
+            const pointDistance = calculateDistance(prev.lat, prev.lng, curr.lat, curr.lng);
+            if (pointDistance < 1.0) {
+                distance += pointDistance;
+            }
+
+            if (curr.speed > 0) {
+                speeds.push(curr.speed);
+            }
+        }
+
+        const avgSpeed = speeds.length > 0
+            ? speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length
+            : 0;
+
+        return {
+            distance: parseFloat(distance.toFixed(2)),
+            avgSpeed: parseFloat(avgSpeed.toFixed(1)),
+            duration: durationMs,
+            startTime: startTime,
+            isActive: true
+        };
+    };
+
+    // Process speed violations
+    const processSpeedViolations = (ride) => {
+        if (!ride) return;
+
+        const violations = ride
+            .filter(point => point.speed > 60)
+            .map(point => ({
+                lat: point.lat,
+                lng: point.lng,
+                speed: point.speed,
+                timestamp: point.timestamp
+            }));
+
+        setSpeedTrajectory(prev => {
+            const fiveMinutesAgo = Date.now() - DATA_RETENTION_MS;
+            const recentViolations = prev.filter(v =>
+                new Date(v.timestamp).getTime() > fiveMinutesAgo
+            );
+            return [...recentViolations, ...violations];
+        });
+    };
+
+    // Clean up old data
+    const cleanupOldData = () => {
+        const now = Date.now();
+        setSpeedTrajectory(prev => prev.filter(violation =>
+            new Date(violation.timestamp).getTime() > now - DATA_RETENTION_MS
+        ));
+        setAlerts(prev => prev.filter(alert =>
+            new Date(alert.timestamp).getTime() > now - DATA_RETENTION_MS
+        ));
+    };
+
+    // Handle map load
+    const handleMapLoad = (map) => {
+        mapRef.current = map;
+        map.setOptions({
+            gestureHandling: 'cooperative',
+            zoomControl: true,
+            mapTypeControl: true,
+            scaleControl: true,
+            streetViewControl: false,
+            rotateControl: true,
+            fullscreenControl: false
+        });
     };
 
     useEffect(() => {
@@ -239,57 +361,27 @@ const LiveTracking = () => {
         const unsubscribe = onValue(eventsRef, (snapshot) => {
             try {
                 const now = Date.now();
-                const newPositions = [];
-                let currentTrip = [];
-                let validPoints = 0;
-                let latestPoint = null;
+                const allEvents = [];
 
+                // Collect all events
                 snapshot.forEach((childSnapshot) => {
                     const event = childSnapshot.val();
-
-                    // Check for alerts first
                     checkForAlerts(event);
 
-                    if (event.location && event.location.lat !== 'waiting-gps') {
-                        const lat = parseFloat(event.location.lat);
-                        const lng = parseFloat(event.location.lng);
-
-                        if (isValidSriLankaCoordinate(lat, lng)) {
-                            const point = {
-                                lat: lat,
-                                lng: lng,
-                                timestamp: childSnapshot.key,
-                                heading: event.heading || 0,
-                                speed: event.speed && event.speed !== "waiting-gps" ? parseFloat(event.speed) : 0,
-                                rawTime: new Date(childSnapshot.key).getTime()
-                            };
-
-                            latestPoint = point;
-                            validPoints++;
-
-                            // Update current speed
-                            if (point.speed > 0) {
-                                setCurrentSpeed(point.speed);
-                            }
-
-                            // Check if point is recent (within last 30 seconds)
-                            const pointTime = new Date(point.timestamp).getTime();
-                            const isRecent = (now - pointTime) < 30000;
-
-                            if (isRecent) {
-                                // Add to current trip if recent
-                                currentTrip.push(point);
-                                newPositions.push({ lat: point.lat, lng: point.lng });
-                            }
-                        }
-                    }
+                    allEvents.push({
+                        ...event,
+                        timestamp: childSnapshot.key,
+                        rawTime: new Date(childSnapshot.key).getTime()
+                    });
                 });
 
-                if (validPoints === 0) {
-                    setDataError('No valid GPS data found');
-                    setCurrentRideActive(false);
+                // Process rides with proper segmentation
+                const rides = processRideData(allEvents);
+
+                if (rides.length === 0) {
+                    setDataError('No valid ride data found');
+                    setCurrentRide([]);
                     setCurrentPosition(null);
-                    setPositions([]);
                     setTripStats({
                         distance: 0,
                         avgSpeed: 0,
@@ -300,246 +392,96 @@ const LiveTracking = () => {
                     return;
                 }
 
-                // Check if ride is active based on latest point
-                if (latestPoint) {
-                    const isRideActive = (now - latestPoint.rawTime) < 30000;
-                    setCurrentRideActive(isRideActive);
+                // Set current ride (most recent)
+                const currentRideData = rides[rides.length - 1];
+                setCurrentRide(currentRideData);
+                setRideHistory(rides.slice(0, -1));
 
-                    if (isRideActive) {
-                        setCurrentPosition(latestPoint);
+                // Set current position (last point of current ride)
+                const latestPoint = currentRideData[currentRideData.length - 1];
+                setCurrentPosition(latestPoint);
 
-                        // Calculate trip statistics only for active ride
-                        if (currentTrip.length > 1) {
-                            const startTime = new Date(currentTrip[0].timestamp);
-                            const endTime = new Date(currentTrip[currentTrip.length - 1].timestamp);
-                            const durationMs = endTime - startTime;
-
-                            // Calculate distance using only consecutive points
-                            let distance = 0;
-                            for (let i = 1; i < currentTrip.length; i++) {
-                                const prev = currentTrip[i-1];
-                                const curr = currentTrip[i];
-                                // Only add distance if points are close together (avoid stationary jumps)
-                                const pointDistance = calculateDistance(prev.lat, prev.lng, curr.lat, curr.lng);
-                                if (pointDistance < 1.0) { // Filter out large jumps
-                                    distance += pointDistance;
-                                }
-                            }
-
-                            // Calculate average speed
-                            const speeds = currentTrip
-                                .filter(point => point.speed > 0)
-                                .map(point => point.speed);
-
-                            const avgSpeed = speeds.length > 0
-                                ? speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length
-                                : 0;
-
-                            setTripStats({
-                                distance: parseFloat(distance.toFixed(2)),
-                                avgSpeed: parseFloat(avgSpeed.toFixed(1)),
-                                duration: durationMs,
-                                startTime: startTime,
-                                isActive: true
-                            });
-                        }
-
-                        // Process speed violations
-                        processSpeedViolations(currentTrip);
-
-                        // Smooth map movement
-                        if (mapRef.current && latestPoint) {
-                            const currentCenter = mapRef.current.getCenter();
-                            const newCenter = new window.google.maps.LatLng(latestPoint.lat, latestPoint.lng);
-
-                            // Only pan if significant movement (> 10 meters)
-                            const distanceMoved = window.google.maps.geometry.spherical.computeDistanceBetween(
-                                currentCenter,
-                                newCenter
-                            );
-
-                            if (distanceMoved > 10) {
-                                mapRef.current.panTo({ lat: latestPoint.lat, lng: latestPoint.lng });
-                            }
-                        }
-                    } else {
-                        // Clear everything when ride ends
-                        setCurrentPosition(null);
-                        setPositions([]);
-                        setTripStats({
-                            distance: 0,
-                            avgSpeed: 0,
-                            duration: 0,
-                            startTime: null,
-                            isActive: false
-                        });
-                        setSpeedTrajectory([]);
-                    }
+                if (latestPoint.speed > 0) {
+                    setCurrentSpeed(latestPoint.speed);
                 }
 
-                setPositions(newPositions);
+                // Check if ride is active (last point within 30 seconds)
+                const isRideActive = (now - latestPoint.rawTime) < RIDE_TIMEOUT_MS;
+
+                // Calculate trip statistics
+                const stats = calculateTripStats(currentRideData);
+                setTripStats({
+                    ...stats,
+                    isActive: isRideActive
+                });
+
+                // Process speed violations
+                if (isRideActive) {
+                    processSpeedViolations(currentRideData);
+                }
+
                 setDataError(null);
 
             } catch (error) {
                 console.error('Data processing error:', error);
                 setDataError('Error processing GPS data');
             }
-
-
         });
 
         return () => unsubscribe();
     }, []);
 
-    // Add this function to clean up old data
-    const cleanupOldData = () => {
-        const now = Date.now();
-        const thirtySecondsAgo = now - 30000;
-
-        // Clean up positions older than 30 seconds
-        setPositions(prev => prev.filter(pos => {
-            // Assuming positions have timestamp, if not, we need to track time
-            return true; // Keep all for now, adjust based on your data structure
-        }));
-
-        // Clean up speed trajectory older than 5 minutes
-        setSpeedTrajectory(prev => prev.filter(violation =>
-            new Date(violation.timestamp).getTime() > thirtySecondsAgo
-        ));
-    };
-
-// Add this useEffect for periodic cleanup
     useEffect(() => {
-        const cleanupInterval = setInterval(cleanupOldData, 10000); // Clean every 10 seconds
+        const cleanupInterval = setInterval(cleanupOldData, 10000);
         return () => clearInterval(cleanupInterval);
     }, []);
 
-
-
-    const isStationaryPoint = (currentPoint, previousPoint, threshold = 0.0001) => {
-        if (!previousPoint) return false;
-        const latDiff = Math.abs(currentPoint.lat - previousPoint.lat);
-        const lngDiff = Math.abs(currentPoint.lng - previousPoint.lng);
-        return latDiff < threshold && lngDiff < threshold;
-    };
-
-    const processSpeedTrajectoryUtil = (ridePoints) => {
-        if (!ridePoints || ridePoints.length === 0) return [];
-        const violations = [];
-        let lastValidPoint = null;
-
-        ridePoints.forEach(point => {
-            if (point.speed && point.speed !== "waiting-gps" && parseFloat(point.speed) > 60) {
-                const currentPoint = {
-                    lat: parseFloat(point.location?.lat),
-                    lng: parseFloat(point.location?.lng),
-                    speed: parseFloat(point.speed),
-                    timestamp: point.timestamp
-                };
-
-                // Skip if this is a stationary duplicate
-                if (!lastValidPoint || !isStationaryPoint(currentPoint, lastValidPoint)) {
-                    violations.push(currentPoint);
-                    lastValidPoint = currentPoint;
-                }
-            }
-        });
-
-        return violations;
-    }
-
-// Update processSpeedTrajectory to avoid stationary duplicates
-    export const processSpeedTrajectory = (ridePoints) => {
-        if (!ridePoints || ridePoints.length === 0) return [];
-
-        const violations = [];
-        let lastValidPoint = null;
-
-        ridePoints.forEach(point => {
-            if (point.speed && point.speed !== "waiting-gps" && parseFloat(point.speed) > 60) {
-                const currentPoint = {
-                    lat: parseFloat(point.location?.lat),
-                    lng: parseFloat(point.location?.lng),
-                    speed: parseFloat(point.speed),
-                    timestamp: point.timestamp
-                };
-
-                // Skip if this is a stationary duplicate
-                if (!lastValidPoint || !isStationaryPoint(currentPoint, lastValidPoint)) {
-                    violations.push(currentPoint);
-                    lastValidPoint = currentPoint;
-                }
-            }
-        });
-
-        return violations;
-    };
-
     useEffect(() => {
-        if (mapRef.current && currentRideActive && currentPosition) {
-            // Use requestAnimationFrame for smooth updates
+        if (mapRef.current && tripStats.isActive && currentPosition) {
             const animateMap = () => {
                 if (mapRef.current && currentPosition) {
-                    const currentCenter = mapRef.current.getCenter();
-                    const newCenter = new window.google.maps.LatLng(
-                        currentPosition.lat,
-                        currentPosition.lng
-                    );
-
-                    // Smooth transition with easing
-                    mapRef.current.panTo(newCenter);
+                    mapRef.current.panTo({
+                        lat: currentPosition.lat,
+                        lng: currentPosition.lng
+                    });
                 }
             };
-
-            // Throttle map updates to prevent blinking
-            const mapUpdateTimer = setTimeout(animateMap, 1000); // Update every second
+            const mapUpdateTimer = setTimeout(animateMap, 1000);
             return () => clearTimeout(mapUpdateTimer);
         }
-    }, [currentPosition, currentRideActive]);
-
-    const handleMapLoad = (map) => {
-    mapRef.current = map;
-
-    // Add smooth panning options
-    map.setOptions({
-        gestureHandling: 'cooperative',
-        zoomControl: true,
-        mapTypeControl: true,
-        scaleControl: true,
-        streetViewControl: false,
-        rotateControl: true,
-        fullscreenControl: false
-    });
-};
+    }, [currentPosition, tripStats.isActive]);
 
     const markers = [];
+    let mapPath = [];
 
-    if (currentRideActive && currentPosition) {
-        // Current Vehicle Position - ONLY show when ride is active
+    if (tripStats.isActive && currentRide.length > 0) {
+        // Only show path for current active ride (filtered stationary points)
+        mapPath = currentRide.map(point => ({ lat: point.lat, lng: point.lng }));
+
+        // Add vehicle marker
         markers.push({
             position: { lat: currentPosition.lat, lng: currentPosition.lng },
             title: `Current Position - ${currentSpeed} km/h`,
             icon: createVehicleIcon(currentPosition.heading || 0)
         });
 
-        // Speed Violation Markers - Only show for current active ride
+        // Add speed violation markers (only from current ride)
         speedTrajectory.forEach((violation) => {
-            // Only show violations from current ride session
             const violationTime = new Date(violation.timestamp).getTime();
             const currentTime = Date.now();
-            if (currentTime - violationTime < 30000) { // Only last 30 seconds
+            if (currentTime - violationTime < DATA_RETENTION_MS) {
                 markers.push({
                     position: { lat: violation.lat, lng: violation.lng },
                     title: `Speed Violation: ${violation.speed} km/h`,
                     icon: {
                         url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
-                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-                            <circle cx="8" cy="8" r="6" fill="#FF6B00" stroke="white" stroke-width="2"/>
-                            <text x="8" y="10" text-anchor="middle" fill="white" font-size="8" font-weight="bold">
-                                ${Math.round(violation.speed)}
-                            </text>
-                        </svg>
-                    `),
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+                                <circle cx="8" cy="8" r="6" fill="#FF6B00" stroke="white" stroke-width="2"/>
+                                <text x="8" y="10" text-anchor="middle" fill="white" font-size="8" font-weight="bold">
+                                    ${Math.round(violation.speed)}
+                                </text>
+                            </svg>
+                        `),
                         scaledSize: new window.google.maps.Size(16, 16),
                         anchor: new window.google.maps.Point(8, 8)
                     }
@@ -548,48 +490,11 @@ const LiveTracking = () => {
         });
     }
 
-    // Trip Markers
-    trips.forEach((trip, tripIndex) => {
-        if (trip.length > 0) {
-            // Start marker
-            markers.push({
-                position: { lat: trip[0].lat, lng: trip[0].lng },
-                title: `Trip ${tripIndex + 1} Start`,
-                icon: {
-                    url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-              <circle cx="8" cy="8" r="6" fill="#4CAF50" stroke="white" stroke-width="2"/>
-            </svg>
-          `),
-                    scaledSize: new window.google.maps.Size(16, 16),
-                    anchor: new window.google.maps.Point(8, 8)
-                }
-            });
-
-            // End marker
-            markers.push({
-                position: { lat: trip[trip.length-1].lat, lng: trip[trip.length-1].lng },
-                title: `Trip ${tripIndex + 1} End`,
-                icon: {
-                    url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(`
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-              <circle cx="8" cy="8" r="6" fill="#F44336" stroke="white" stroke-width="2"/>
-            </svg>
-          `),
-                    scaledSize: new window.google.maps.Size(16, 16),
-                    anchor: new window.google.maps.Point(8, 8)
-                }
-            });
-        }
-    });
-
-    // Format duration for display
     const formatDuration = (ms) => {
         if (!ms) return '00:00:00';
         const seconds = Math.floor((ms / 1000) % 60);
         const minutes = Math.floor((ms / (1000 * 60)) % 60);
         const hours = Math.floor(ms / (1000 * 60 * 60));
-
         return [
             hours.toString().padStart(2, '0'),
             minutes.toString().padStart(2, '0'),
@@ -599,68 +504,39 @@ const LiveTracking = () => {
 
     return (
         <Box sx={{ height: '100vh', width: '100%', position: 'relative', display: 'flex' }}>
-            {/* Sidebar with metrics */}
-            <Paper sx={{
-                width: 320,
-                p: 2,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: 2,
-                borderRadius: 0,
-                boxShadow: 3,
-                zIndex: 1000
-            }}>
-                {currentRideActive ? (
+            <Paper sx={{ width: 320, p: 2, display: 'flex', flexDirection: 'column', gap: 2, borderRadius: 0, boxShadow: 3, zIndex: 1000 }}>
+                {tripStats.isActive ? (
                     <>
-                        {/* Speed Gauge */}
                         <SpeedGauge speed={currentSpeed} />
-
-                        {/* Trip Statistics - ONLY show when ride is active */}
                         <Paper sx={{ p: 2 }}>
                             <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
                                 <TrendingUpIcon sx={{ mr: 1 }} /> Live Trip Statistics
                             </Typography>
-
                             <Grid container spacing={2}>
                                 <Grid item xs={6}>
                                     <Box sx={{ textAlign: 'center' }}>
                                         <Typography variant="h4" color="primary" fontWeight="bold">
                                             {tripStats.distance}
                                         </Typography>
-                                        <Typography variant="body2" color="text.secondary">
-                                            km
-                                        </Typography>
+                                        <Typography variant="body2" color="text.secondary">km</Typography>
                                     </Box>
                                 </Grid>
-
                                 <Grid item xs={6}>
                                     <Box sx={{ textAlign: 'center' }}>
                                         <Typography variant="h4" color="primary" fontWeight="bold">
                                             {tripStats.avgSpeed}
                                         </Typography>
-                                        <Typography variant="body2" color="text.secondary">
-                                            km/h avg
-                                        </Typography>
+                                        <Typography variant="body2" color="text.secondary">km/h avg</Typography>
                                     </Box>
                                 </Grid>
-
                                 <Grid item xs={12}>
-                                    <Box sx={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                        gap: 1
-                                    }}>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
                                         <TimeIcon color="action" />
-                                        <Typography variant="h6">
-                                            {formatDuration(tripStats.duration)}
-                                        </Typography>
+                                        <Typography variant="h6">{formatDuration(tripStats.duration)}</Typography>
                                     </Box>
                                 </Grid>
                             </Grid>
                         </Paper>
-
-                        {/* Active Alerts */}
                         {alerts.length > 0 && (
                             <Paper sx={{ p: 2 }}>
                                 <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
@@ -672,10 +548,7 @@ const LiveTracking = () => {
                                             key={index}
                                             icon={alert.type === 'FIRE' ? <FireIcon /> : <WarningIcon />}
                                             label={`${alert.type} - ${new Date(alert.timestamp).toLocaleTimeString()}`}
-                                            color={
-                                                alert.severity === 'critical' ? 'error' :
-                                                    alert.severity === 'high' ? 'warning' : 'info'
-                                            }
+                                            color={alert.severity === 'critical' ? 'error' : alert.severity === 'high' ? 'warning' : 'info'}
                                             variant="filled"
                                             size="small"
                                         />
@@ -683,23 +556,14 @@ const LiveTracking = () => {
                                 </Box>
                             </Paper>
                         )}
-
-                        {/* Vehicle Status - ONLY show when ride is active */}
                         <Paper sx={{ p: 2 }}>
                             <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
                                 <CarIcon sx={{ mr: 1 }} /> Vehicle Status
                             </Typography>
-
                             <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
                                 <Typography variant="body2">Connection:</Typography>
-                                <Chip
-                                    label="Live"
-                                    size="small"
-                                    color="success"
-                                    variant="outlined"
-                                />
+                                <Chip label="Live" size="small" color="success" variant="outlined" />
                             </Box>
-
                             <Box sx={{ display: 'flex', justifyContent: 'space-between', mt: 1 }}>
                                 <Typography variant="body2">Last update:</Typography>
                                 <Typography variant="body2">
@@ -709,85 +573,32 @@ const LiveTracking = () => {
                         </Paper>
                     </>
                 ) : (
-                    /* Show this when no active ride */
                     <Paper sx={{ p: 2, textAlign: 'center' }}>
                         <CarIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-                        <Typography variant="h6" color="text.secondary" gutterBottom>
-                            No Active Ride
-                        </Typography>
+                        <Typography variant="h6" color="text.secondary" gutterBottom>No Active Ride</Typography>
                         <Typography variant="body2" color="text.secondary">
-                            Vehicle is currently stationary.
-                            Trip statistics will appear when a ride begins.
+                            Vehicle is currently stationary. Trip statistics will appear when a ride begins.
                         </Typography>
                     </Paper>
                 )}
             </Paper>
 
-
-            {/* Map Area */}
             <Box sx={{ flex: 1, position: 'relative' }}>
                 {dataError && (
-                    <Box sx={{
-                        position: 'absolute',
-                        top: 10,
-                        left: 10,
-                        zIndex: 1000,
-                        backgroundColor: 'white',
-                        padding: 2,
-                        borderRadius: 1,
-                        boxShadow: 3
-                    }}>
+                    <Box sx={{ position: 'absolute', top: 10, left: 10, zIndex: 1000, backgroundColor: 'white', padding: 2, borderRadius: 1, boxShadow: 3 }}>
                         <Typography color="error">{dataError}</Typography>
                     </Box>
                 )}
-
-                <Box sx={{
-                    position: 'absolute',
-                    top: 10,
-                    right: 10,
-                    zIndex: 1000,
-                    backgroundColor: 'white',
-                    padding: 1,
-                    borderRadius: 1,
-                    boxShadow: 3,
-                    display: 'flex',
-                    gap: 1
-                }}>
-                    <button
-                        onClick={() => setMapType('roadmap')}
-                        style={{
-                            padding: '5px 10px',
-                            backgroundColor: mapType === 'roadmap' ? '#1976d2' : '#f5f5f5',
-                            color: mapType === 'roadmap' ? 'white' : 'black',
-                            border: '1px solid #ccc',
-                            borderRadius: '3px',
-                            cursor: 'pointer'
-                        }}
-                    >
-                        Normal
-                    </button>
-                    <button
-                        onClick={() => setMapType('satellite')}
-                        style={{
-                            padding: '5px 10px',
-                            backgroundColor: mapType === 'satellite' ? '#1976d2' : '#f5f5f5',
-                            color: mapType === 'satellite' ? 'white' : 'black',
-                            border: '1px solid #ccc',
-                            borderRadius: '3px',
-                            cursor: 'pointer'
-                        }}
-                    >
-                        Satellite
-                    </button>
+                <Box sx={{ position: 'absolute', top: 10, right: 10, zIndex: 1000, backgroundColor: 'white', padding: 1, borderRadius: 1, boxShadow: 3, display: 'flex', gap: 1 }}>
+                    <button onClick={() => setMapType('roadmap')} style={{ padding: '5px 10px', backgroundColor: mapType === 'roadmap' ? '#1976d2' : '#f5f5f5', color: mapType === 'roadmap' ? 'white' : 'black', border: '1px solid #ccc', borderRadius: '3px', cursor: 'pointer' }}>Normal</button>
+                    <button onClick={() => setMapType('satellite')} style={{ padding: '5px 10px', backgroundColor: mapType === 'satellite' ? '#1976d2' : '#f5f5f5', color: mapType === 'satellite' ? 'white' : 'black', border: '1px solid #ccc', borderRadius: '3px', cursor: 'pointer' }}>Satellite</button>
                 </Box>
-
                 <GoogleMapWrapper
-                    center={currentRideActive && currentPosition ?
-                {lat : currentPosition.lat, lng: currentPosition.lng} :
-                {lat: 6.9271, lng: 79.8612}
-                }
-                    zoom={currentRideActive ? 15 : 10}
-                    path={currentRideActive ? positions : []}
+                    center={tripStats.isActive && currentPosition ?
+                        {lat: currentPosition.lat, lng: currentPosition.lng} :
+                        {lat: 6.9271, lng: 79.8612}}
+                    zoom={tripStats.isActive ? 15 : 10}
+                    path={mapPath} // Only shows current active ride's path
                     markers={markers}
                     onMapLoad={handleMapLoad}
                     mapTypeId={mapType}
