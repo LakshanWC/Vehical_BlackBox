@@ -21,7 +21,6 @@ An **IoT-powered Vehicle Black Box** that monitors crashes, fires, and driving d
 - MPU6050 (Accelerometer + Gyroscope)  
 - NEO-6M GPS Module  
 - Fire Sensor  
-- 
 - Power Supply (Car battery or USB)  
 
 ---
