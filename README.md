@@ -2,7 +2,7 @@
 
 An **IoT-powered Vehicle Black Box** that monitors crashes, fires, and driving data in real-time. Inspired by aircraft black boxes, this system records key sensor data and can help in **accident analysis, safety monitoring, and emergency response**.  
 ---
-https://gitdocs1.s3.amazonaws.com/digests/lakshanwc-vehical_blackbox/cbe20395-2fe9-4944-9195-e0faa210f952.txt
+[Project Documentation](https://gitdocs1.s3.amazonaws.com/digests/lakshanwc-vehical_blackbox/cbe20395-2fe9-4944-9195-e0faa210f952.txt)
 ---
 
 ## 🔧 Features  
